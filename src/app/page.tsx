@@ -56,6 +56,14 @@ export default function Home() {
     b: { lng: number; lat: number } | null;
   } | null>(null);
   const [routeColor, setRouteColor] = useState("#00d4ff");
+  const [transitGeo, setTransitGeo] = useState<{
+    type: "FeatureCollection";
+    features: {
+      type: "Feature";
+      geometry: { type: "LineString"; coordinates: [number, number][] };
+      properties: Record<string, unknown>;
+    }[];
+  } | null>(null);
 
   /* --- Sesion + favoritos --- */
   const cargarFavoritos = useCallback(async () => {
@@ -153,6 +161,7 @@ export default function Home() {
         routeGeo={routeGeo}
         routePoints={routePoints}
         routeColor={routeColor}
+        transitGeo={transitGeo}
         onSelect={setSel}
         onPick={handlePick}
       />
@@ -178,6 +187,7 @@ export default function Home() {
           onRouteGeo={setRouteGeo}
           onSetRoutePoints={setRoutePoints}
           onSetRouteColor={setRouteColor}
+          onSetTransitGeo={setTransitGeo}
         />
 
         {/* Banner de modo "colocar pin" */}

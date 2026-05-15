@@ -5,6 +5,31 @@ import path from "path";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const SUBTE_NET_COLORS: Record<string, string> = {
+  "Linea A": "#18b5e6",
+  "Linea B": "#e2231a",
+  "Linea C": "#1455a0",
+  "Linea D": "#00845a",
+  "Linea E": "#642d8b",
+  "Linea H": "#f4c500",
+};
+
+const TREN_NET_COLORS: Record<string, string> = {
+  "Sarmiento": "#d4a017",
+  "Mitre": "#9e9e9e",
+  "Roca": "#c62828",
+  "Belgrano Sur": "#555555",
+  "Belgrano Norte": "#c62828",
+  "San Martin": "#2e7d32",
+  "Urquiza": "#7c3aed",
+};
+
+interface NetLineFeature {
+  type: "Feature";
+  geometry: { type: "LineString"; coordinates: [number, number][] };
+  properties: Record<string, unknown>;
+}
+
 interface StationFeature {
   type: "Feature";
   geometry: { type: "Point"; coordinates: [number, number] };
@@ -227,7 +252,48 @@ export async function GET(request: NextRequest) {
       duracion: fromMin,
     });
 
-    return NextResponse.json({ steps, stationA: nameA, stationB: nameB, lineA, lineB });
+    // Build transit network geometry for the detected lines
+    let transitGeo: { type: "FeatureCollection"; features: NetLineFeature[] } | null = null;
+    try {
+      if (mode === "subte") {
+        const netFile = path.join(ds, "subte", "red_subte.geojson");
+        const netData = JSON.parse(fs.readFileSync(netFile, "utf8")) as {
+          features: NetLineFeature[];
+        };
+        const lineNames = [...new Set([`Linea ${lineA}`, `Linea ${lineB}`])];
+        const features = netData.features
+          .filter((f) => lineNames.includes(f.properties.nombre as string))
+          .map((f) => ({
+            ...f,
+            properties: {
+              ...f.properties,
+              lineColor: SUBTE_NET_COLORS[f.properties.nombre as string] ?? "#00aeef",
+            },
+          }));
+        transitGeo = { type: "FeatureCollection", features };
+      } else if (mode === "trenes") {
+        const netFile = path.join(ds, "trenes", "red-de-ferrocarril.geojson");
+        const netData = JSON.parse(fs.readFileSync(netFile, "utf8")) as {
+          features: NetLineFeature[];
+        };
+        // Station linea field is "Mitre , F.C.G.B.M." — extract the first part
+        const linea2Name = lineA.split(" , ")[0].trim();
+        const features = netData.features
+          .filter((f) => f.properties.linea_2 === linea2Name)
+          .map((f) => ({
+            ...f,
+            properties: {
+              ...f.properties,
+              lineColor: TREN_NET_COLORS[linea2Name] ?? "#2dd4bf",
+            },
+          }));
+        transitGeo = { type: "FeatureCollection", features };
+      }
+    } catch {
+      // transitGeo stays null, steps still returned
+    }
+
+    return NextResponse.json({ steps, stationA: nameA, stationB: nameB, lineA, lineB, transitGeo });
   } catch (err) {
     return NextResponse.json(
       { error: "Error al buscar estaciones", detail: String(err) },

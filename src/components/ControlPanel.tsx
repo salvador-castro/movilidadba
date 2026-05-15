@@ -36,7 +36,17 @@ interface Props {
     pts: { a: { lng: number; lat: number } | null; b: { lng: number; lat: number } | null } | null,
   ) => void;
   onSetRouteColor: (color: string) => void;
+  onSetTransitGeo: (geo: TransitGeo | null) => void;
 }
+
+type TransitGeo = {
+  type: "FeatureCollection";
+  features: {
+    type: "Feature";
+    geometry: { type: "LineString"; coordinates: [number, number][] };
+    properties: Record<string, unknown>;
+  }[];
+};
 
 const MODOS_TRANSITO: {
   id: string;
@@ -202,6 +212,7 @@ export default function ControlPanel({
   onRouteGeo,
   onSetRoutePoints,
   onSetRouteColor,
+  onSetTransitGeo,
 }: Props) {
   const [abierto, setAbierto] = useState(true);
   const [capasAbiertas, setCapasAbiertas] = useState(false);
@@ -317,6 +328,7 @@ export default function ControlPanel({
     setFetchingTransit(false);
     onRouteGeo(null);
     onSetRouteColor("#00d4ff");
+    onSetTransitGeo(null);
   }
 
   // Keep calcularOpciones in a ref so the useEffect below always calls the latest version
@@ -394,6 +406,7 @@ export default function ControlPanel({
     setModoSel(modo.id);
     setTransitSteps(null);
     onSetRouteColor(MODO_COLORS[modo.id] ?? "#00d4ff");
+    onSetTransitGeo(null);
 
     if ((modo.id === "subte" || modo.id === "tren") && coordsA && coordsB) {
       setFetchingTransit(true);
@@ -404,8 +417,12 @@ export default function ControlPanel({
         );
         const data = (await res.json()) as {
           steps?: { icono: string; texto: string; duracion: number }[];
+          transitGeo?: TransitGeo;
         };
-        if (res.ok) setTransitSteps(data.steps ?? null);
+        if (res.ok) {
+          setTransitSteps(data.steps ?? null);
+          if (data.transitGeo) onSetTransitGeo(data.transitGeo);
+        }
       } catch {
         /* silent */
       } finally {
@@ -427,6 +444,7 @@ export default function ControlPanel({
     setFetchingTransit(false);
     onRouteGeo(null);
     onSetRouteColor("#00d4ff");
+    onSetTransitGeo(null);
   }
 
   return (

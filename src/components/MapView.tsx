@@ -33,6 +33,14 @@ const POINT_LAYERS = [
 ];
 
 type RouteGeometry = { type: "LineString"; coordinates: [number, number][] };
+type TransitGeo = {
+  type: "FeatureCollection";
+  features: {
+    type: "Feature";
+    geometry: { type: "LineString"; coordinates: [number, number][] };
+    properties: Record<string, unknown>;
+  }[];
+} | null;
 
 interface Props {
   visibility: LayerVisibility;
@@ -45,6 +53,7 @@ interface Props {
   routeGeo: RouteGeometry | null;
   routePoints: { a: { lng: number; lat: number } | null; b: { lng: number; lat: number } | null } | null;
   routeColor: string;
+  transitGeo: TransitGeo;
   onSelect: (sel: SeleccionMapa | null) => void;
   onPick: (lng: number, lat: number) => void;
 }
@@ -60,6 +69,7 @@ export default function MapView({
   routeGeo,
   routePoints,
   routeColor,
+  transitGeo,
   onSelect,
   onPick,
 }: Props) {
@@ -138,6 +148,34 @@ export default function MapView({
         source: "src-route",
         layout: { "line-cap": "round", "line-join": "round" },
         paint: { "line-color": "#00d4ff", "line-width": 4 },
+      });
+
+      // Transit network overlay — data-driven color per feature
+      map.addSource("src-transit", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.addLayer({
+        id: "lyr-transit-bg",
+        type: "line",
+        source: "src-transit",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": ["coalesce", ["get", "lineColor"], "#ffffff"],
+          "line-width": 10,
+          "line-opacity": 0.18,
+        },
+      });
+      map.addLayer({
+        id: "lyr-transit",
+        type: "line",
+        source: "src-transit",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": ["coalesce", ["get", "lineColor"], "#00aeef"],
+          "line-width": 5,
+          "line-opacity": 0.9,
+        },
       });
 
       syncLayers();
@@ -602,6 +640,30 @@ export default function MapView({
         : { type: "FeatureCollection", features: [] },
     );
   }, [routeGeo]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !readyRef.current) return;
+    const src = map.getSource("src-transit") as maplibregl.GeoJSONSource | undefined;
+    if (!src) return;
+    src.setData(transitGeo ?? { type: "FeatureCollection", features: [] });
+
+    // Position transit layers above static line layers, below station dots
+    if (map.getLayer("lyr-transit")) {
+      const firstPoint = POINT_LAYERS.find((id) => map.getLayer(id));
+      if (firstPoint) {
+        map.moveLayer("lyr-transit-bg", firstPoint);
+        map.moveLayer("lyr-transit", firstPoint);
+      }
+    }
+
+    // Hide the walking route line while transit network is shown
+    if (map.getLayer("lyr-route")) {
+      const vis = transitGeo ? "none" : "visible";
+      map.setLayoutProperty("lyr-route", "visibility", vis);
+      map.setLayoutProperty("lyr-route-bg", "visibility", vis);
+    }
+  }, [transitGeo]);
 
   // Estilo inline: la CSS de MapLibre (.maplibregl-map) pisaria una clase de
   // Tailwind por el orden de capas. Inline gana siempre.

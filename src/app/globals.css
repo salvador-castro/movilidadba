@@ -1,26 +1,148 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@theme {
+  --color-bg: #090a0f;
+  --color-panel: #11131d;
+  --color-panel-soft: #181b29;
+  --color-line: #262a3d;
+  --color-ink: #e9ebf2;
+  --color-muted: #8b91a3;
+  --color-accent: #00d4ff;
+  --color-accent-2: #a78bfa;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* --- Paneles de vidrio --- */
+.glass {
+  background: color-mix(in srgb, var(--color-panel) 82%, transparent);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  border: 1px solid var(--color-line);
+}
+
+/* --- Scrollbar --- */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+.scroll-thin::-webkit-scrollbar {
+  width: 8px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 99px;
+}
+
+/* --- Animaciones --- */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-up {
+  animation: fade-up 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.live-dot {
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.animate-spin-slow {
+  animation: spin 0.8s linear infinite;
+}
+
+/* --- MapLibre: tema oscuro para popups y controles --- */
+.maplibregl-popup-content {
+  background: var(--color-panel) !important;
+  color: var(--color-ink) !important;
+  border: 1px solid var(--color-line);
+  border-radius: 14px !important;
+  padding: 12px 14px !important;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5) !important;
+  font-family: var(--font-sans), sans-serif;
+}
+.maplibregl-popup-tip {
+  border-top-color: var(--color-panel) !important;
+  border-bottom-color: var(--color-panel) !important;
+}
+.maplibregl-popup-close-button {
+  color: var(--color-muted) !important;
+  font-size: 17px !important;
+  padding: 4px 7px !important;
+}
+.maplibregl-ctrl-group {
+  background: var(--color-panel) !important;
+  border: 1px solid var(--color-line) !important;
+  border-radius: 12px !important;
+  overflow: hidden;
+}
+.maplibregl-ctrl-group button {
+  background: transparent !important;
+}
+.maplibregl-ctrl-group button + button {
+  border-top: 1px solid var(--color-line) !important;
+}
+.maplibregl-ctrl-icon {
+  filter: invert(1) brightness(1.4);
+}
+.maplibregl-ctrl-attrib {
+  background: rgba(9, 10, 15, 0.7) !important;
+  color: var(--color-muted) !important;
+}
+.maplibregl-ctrl-attrib a {
+  color: var(--color-muted) !important;
+}
+
+/* --- Marcadores custom --- */
+.fav-marker {
+  cursor: pointer;
+  font-size: 22px;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.6));
+  transition: transform 0.15s ease;
+}
+.fav-marker:hover {
+  transform: scale(1.2);
+}
+.pick-marker {
+  font-size: 30px;
+  filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.7));
 }

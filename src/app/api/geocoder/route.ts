@@ -36,8 +36,26 @@ export async function GET(request: NextRequest) {
   const direccion = sp.get("direccion")?.trim();
   const lat = sp.get("lat");
   const lng = sp.get("lng");
+  const sugerencias = sp.get("sugerencias")?.trim();
 
   try {
+    // --- Sugerencias rápidas (sin geocodificar) ---
+    if (sugerencias) {
+      if (sugerencias.length < 3) return NextResponse.json({ resultados: [] });
+      const res = await fetch(
+        `${NORMALIZADOR}/?direccion=${encodeURIComponent(sugerencias)}&maxOptions=6`,
+        { cache: "no-store" },
+      );
+      const data = (await res.json()) as {
+        direccionesNormalizadas?: DireccionNormalizada[];
+      };
+      const resultados = (data.direccionesNormalizadas ?? [])
+        .filter((d) => d.cod_partido === "caba" && d.direccion)
+        .map((d) => d.direccion as string)
+        .slice(0, 5);
+      return NextResponse.json({ resultados });
+    }
+
     // --- Inverso: coordenadas -> direccion legible ---
     if (lat && lng) {
       const res = await fetch(

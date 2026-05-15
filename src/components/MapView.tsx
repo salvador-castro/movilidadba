@@ -32,6 +32,8 @@ const POINT_LAYERS = [
   "lyr-ecobici-labels",
 ];
 
+type RouteGeometry = { type: "LineString"; coordinates: [number, number][] };
+
 interface Props {
   visibility: LayerVisibility;
   colectivosFiltro: string;
@@ -40,6 +42,7 @@ interface Props {
   pendingPick: { lng: number; lat: number } | null;
   searchResult: { lng: number; lat: number; label: string } | null;
   flyTarget: { lng: number; lat: number; zoom?: number } | null;
+  routeGeo: RouteGeometry | null;
   onSelect: (sel: SeleccionMapa | null) => void;
   onPick: (lng: number, lat: number) => void;
 }
@@ -52,6 +55,7 @@ export default function MapView({
   pendingPick,
   searchResult,
   flyTarget,
+  routeGeo,
   onSelect,
   onPick,
 }: Props) {
@@ -107,6 +111,27 @@ export default function MapView({
 
     map.on("load", () => {
       readyRef.current = true;
+
+      // Fuente y capas de ruta (siempre presentes, inicialmente vacías)
+      map.addSource("src-route", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.addLayer({
+        id: "lyr-route-bg",
+        type: "line",
+        source: "src-route",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#ffffff", "line-width": 8, "line-opacity": 0.2 },
+      });
+      map.addLayer({
+        id: "lyr-route",
+        type: "line",
+        source: "src-route",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#00d4ff", "line-width": 4 },
+      });
+
       syncLayers();
       syncMarkers();
     });
@@ -520,6 +545,21 @@ export default function MapView({
       });
     }
   }, [flyTarget]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !readyRef.current) return;
+    const src = map.getSource("src-route") as maplibregl.GeoJSONSource | undefined;
+    if (!src) return;
+    src.setData(
+      routeGeo
+        ? {
+            type: "FeatureCollection",
+            features: [{ type: "Feature", geometry: routeGeo, properties: {} }],
+          }
+        : { type: "FeatureCollection", features: [] },
+    );
+  }, [routeGeo]);
 
   // Estilo inline: la CSS de MapLibre (.maplibregl-map) pisaria una clase de
   // Tailwind por el orden de capas. Inline gana siempre.

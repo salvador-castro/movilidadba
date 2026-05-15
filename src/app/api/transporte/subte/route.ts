@@ -46,10 +46,13 @@ export async function GET() {
         },
       },
     );
-  } catch (err) {
+  } catch {
     return NextResponse.json(
-      { error: "No se pudo obtener el estado del subte", detail: String(err) },
-      { status: 502 },
+      { lineas: [] },
+      {
+        status: 200,
+        headers: { "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60" },
+      },
     );
   }
 }

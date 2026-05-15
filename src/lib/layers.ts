@@ -20,7 +20,7 @@ export const LAYERS: LayerMeta[] = [
     color: "#00aeef",
     emoji: "\u{1F687}",
     kind: "estatico",
-    defaultOn: true,
+    defaultOn: false,
   },
   {
     key: "ecobici",
@@ -29,7 +29,7 @@ export const LAYERS: LayerMeta[] = [
     color: "#22c55e",
     emoji: "\u{1F6B2}",
     kind: "live",
-    defaultOn: true,
+    defaultOn: false,
   },
   {
     key: "colectivos",
@@ -47,7 +47,7 @@ export const LAYERS: LayerMeta[] = [
     color: "#ffcc00",
     emoji: "\u{1F695}",
     kind: "estatico",
-    defaultOn: true,
+    defaultOn: false,
   },
   {
     key: "trenes",
@@ -65,7 +65,7 @@ export const LAYERS: LayerMeta[] = [
     color: "#84cc16",
     emoji: "\u{1F6E3}️",
     kind: "estatico",
-    defaultOn: true,
+    defaultOn: false,
   },
   {
     key: "premetro",

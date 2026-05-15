@@ -35,22 +35,16 @@ export default function SubteStatus() {
     };
   }, []);
 
-  if (error) {
-    return (
-      <p className="text-xs text-muted">
-        No se pudo cargar el estado del subte.
-      </p>
-    );
-  }
+  const datos = error ? [] : alertas;
 
-  if (!alertas) {
-    return <p className="text-xs text-muted">Cargando estado del subte…</p>;
+  if (!datos) {
+    return <p className="text-xs text-muted">Cargando…</p>;
   }
 
   return (
     <div className="grid grid-cols-2 gap-1.5">
       {LINEAS.map((l) => {
-        const alerta = alertas.find((a) => a.linea === l);
+        const alerta = datos.find((a) => a.linea === l);
         return (
           <div
             key={l}
@@ -65,10 +59,10 @@ export default function SubteStatus() {
             </span>
             <span
               className={`truncate text-[11px] ${
-                alerta ? "text-amber-400" : "text-emerald-400"
+                error ? "text-muted" : alerta ? "text-amber-400" : "text-emerald-400"
               }`}
             >
-              {alerta ? alerta.titulo : "Normal"}
+              {error ? "Sin datos" : alerta ? alerta.titulo : "Normal"}
             </span>
           </div>
         );

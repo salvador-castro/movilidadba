@@ -1,15 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { LAYERS } from "@/lib/layers";
 import type { Favorito, LayerKey, LayerVisibility } from "@/lib/types";
 import SubteStatus from "./SubteStatus";
 
-interface RoutePoint {
-  text: string;
-  coords: { lat: number; lng: number } | null;
-}
+type RouteGeometry = { type: "LineString"; coordinates: [number, number][] };
 
 interface Props {
   visibility: LayerVisibility;
@@ -19,12 +16,88 @@ interface Props {
   userEmail: string | null;
   favoritos: Favorito[];
   onSearch: (direccion: string) => Promise<{ ok: boolean; message?: string }>;
-  onFlyTo: (lng: number, lat: number) => void;
+  onFlyTo: (lng: number, lat: number, zoom?: number) => void;
   onDeleteFav: (id: string) => void;
   onStartPlacing: () => void;
   onSignOut: () => void;
   searchResult: { lng: number; lat: number; label: string } | null;
   onClearSearch: () => void;
+  onRouteGeo: (geo: RouteGeometry | null) => void;
+}
+
+async function fetchSugs(text: string): Promise<string[]> {
+  if (text.length < 3) return [];
+  try {
+    const res = await fetch(
+      `/api/geocoder?sugerencias=${encodeURIComponent(text)}`,
+    );
+    const data = await res.json() as { resultados?: string[] };
+    return data.resultados ?? [];
+  } catch {
+    return [];
+  }
+}
+
+async function geocodeAddr(
+  addr: string,
+): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const res = await fetch(
+      `/api/geocoder?direccion=${encodeURIComponent(addr)}`,
+    );
+    const data = await res.json() as { lat?: number; lng?: number };
+    if (!res.ok || !data.lat) return null;
+    return { lat: data.lat, lng: data.lng! };
+  } catch {
+    return null;
+  }
+}
+
+function useSugerencias(text: string) {
+  const [items, setItems] = useState<string[]>([]);
+  const [show, setShow] = useState(false);
+
+  useEffect(() => {
+    if (text.length < 3) {
+      setItems([]);
+      return;
+    }
+    const t = setTimeout(async () => {
+      const results = await fetchSugs(text);
+      setItems(results);
+      if (results.length > 0) setShow(true);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [text]);
+
+  return { items, show, setShow };
+}
+
+function SugDropdown({
+  items,
+  onSelect,
+}: {
+  items: string[];
+  onSelect: (s: string) => void;
+}) {
+  if (!items.length) return null;
+  return (
+    <ul className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-xl border border-line bg-panel-soft shadow-xl">
+      {items.map((s, i) => (
+        <li key={i}>
+          <button
+            onMouseDown={(e) => {
+              e.preventDefault();
+              onSelect(s);
+            }}
+            className="w-full px-3 py-2 text-left text-sm text-ink transition hover:bg-panel-soft"
+          >
+            {s}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 export default function ControlPanel({
@@ -41,19 +114,29 @@ export default function ControlPanel({
   onSignOut,
   searchResult,
   onClearSearch,
+  onRouteGeo,
 }: Props) {
   const [abierto, setAbierto] = useState(true);
+  const [capasAbiertas, setCapasAbiertas] = useState(false);
+
+  // Main search
   const [busqueda, setBusqueda] = useState("");
   const [buscando, setBuscando] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-  const [capasAbiertas, setCapasAbiertas] = useState(false);
+  const sugSearch = useSugerencias(busqueda);
 
-  // Route A -> B
-  const [routeA, setRouteA] = useState<RoutePoint>({ text: "", coords: null });
-  const [routeB, setRouteB] = useState<RoutePoint>({ text: "", coords: null });
+  // Route planner
+  const [textA, setTextA] = useState("");
+  const [coordsA, setCoordsA] = useState<{ lat: number; lng: number } | null>(null);
+  const [textB, setTextB] = useState("");
+  const [coordsB, setCoordsB] = useState<{ lat: number; lng: number } | null>(null);
   const [geocodingA, setGeocodingA] = useState(false);
   const [geocodingB, setGeocodingB] = useState(false);
-  const [routeError, setRouteError] = useState<string | null>(null);
+  const [calculando, setCalculando] = useState(false);
+  const [routeInfo, setRouteInfo] = useState<{ distance: number; duration: number } | null>(null);
+  const [routeErr, setRouteErr] = useState<string | null>(null);
+  const sugA = useSugerencias(textA);
+  const sugB = useSugerencias(textB);
 
   async function buscar(e: React.FormEvent) {
     e.preventDefault();
@@ -62,54 +145,105 @@ export default function ControlPanel({
     setMsg(null);
     const r = await onSearch(busqueda.trim());
     setBuscando(false);
+    sugSearch.setShow(false);
     if (!r.ok) setMsg(r.message ?? "No se encontró la dirección.");
   }
 
-  async function geocodeAddr(addr: string): Promise<{ lat: number; lng: number; label: string } | null> {
-    try {
-      const res = await fetch(`/api/geocoder?direccion=${encodeURIComponent(addr)}`);
-      const data = await res.json();
-      if (!res.ok) return null;
-      return { lat: data.lat, lng: data.lng, label: data.label };
-    } catch {
-      return null;
-    }
+  async function seleccionarSugSearch(s: string) {
+    setBusqueda(s);
+    sugSearch.setShow(false);
+    setBuscando(true);
+    setMsg(null);
+    const r = await onSearch(s);
+    setBuscando(false);
+    if (!r.ok) setMsg(r.message ?? "No se encontró la dirección.");
   }
 
-  async function buscarRutaA(e: React.FormEvent) {
-    e.preventDefault();
-    if (!routeA.text.trim() || geocodingA) return;
+  async function geocodearA(text: string) {
     setGeocodingA(true);
-    setRouteError(null);
-    const coords = await geocodeAddr(routeA.text.trim());
+    setRouteErr(null);
+    const coords = await geocodeAddr(text);
     setGeocodingA(false);
     if (coords) {
-      setRouteA((prev) => ({ ...prev, coords }));
+      setCoordsA(coords);
       onFlyTo(coords.lng, coords.lat);
     } else {
-      setRouteError("No se encontró la dirección de origen.");
+      setRouteErr("No se encontró la dirección de origen.");
     }
   }
 
-  async function buscarRutaB(e: React.FormEvent) {
-    e.preventDefault();
-    if (!routeB.text.trim() || geocodingB) return;
+  async function geocodearB(text: string) {
     setGeocodingB(true);
-    setRouteError(null);
-    const coords = await geocodeAddr(routeB.text.trim());
+    setRouteErr(null);
+    const coords = await geocodeAddr(text);
     setGeocodingB(false);
     if (coords) {
-      setRouteB((prev) => ({ ...prev, coords }));
+      setCoordsB(coords);
       onFlyTo(coords.lng, coords.lat);
     } else {
-      setRouteError("No se encontró la dirección de destino.");
+      setRouteErr("No se encontró la dirección de destino.");
     }
   }
 
-  const routeUrl =
-    routeA.coords && routeB.coords
-      ? `https://www.google.com/maps/dir/${routeA.coords.lat},${routeA.coords.lng}/${routeB.coords.lat},${routeB.coords.lng}`
-      : null;
+  async function submitA(e: React.FormEvent) {
+    e.preventDefault();
+    if (!textA.trim() || geocodingA) return;
+    sugA.setShow(false);
+    await geocodearA(textA.trim());
+  }
+
+  async function submitB(e: React.FormEvent) {
+    e.preventDefault();
+    if (!textB.trim() || geocodingB) return;
+    sugB.setShow(false);
+    await geocodearB(textB.trim());
+  }
+
+  async function calcularRuta() {
+    if (!coordsA || !coordsB || calculando) return;
+    setCalculando(true);
+    setRouteErr(null);
+    try {
+      const res = await fetch(
+        `/api/ruta?olng=${coordsA.lng}&olat=${coordsA.lat}&dlng=${coordsB.lng}&dlat=${coordsB.lat}`,
+      );
+      const data = await res.json() as {
+        geometry?: RouteGeometry;
+        distance?: number;
+        duration?: number;
+        error?: string;
+      };
+      if (!res.ok || !data.geometry) {
+        setRouteErr(data.error ?? "No se pudo calcular la ruta.");
+      } else {
+        onRouteGeo(data.geometry);
+        setRouteInfo({ distance: data.distance!, duration: data.duration! });
+        // Fly to midpoint at zoom 13 to show the full route
+        onFlyTo(
+          (coordsA.lng + coordsB.lng) / 2,
+          (coordsA.lat + coordsB.lat) / 2,
+          13,
+        );
+      }
+    } catch {
+      setRouteErr("Error de conexión al calcular la ruta.");
+    } finally {
+      setCalculando(false);
+    }
+  }
+
+  function limpiarRuta() {
+    setTextA("");
+    setTextB("");
+    setCoordsA(null);
+    setCoordsB(null);
+    setRouteInfo(null);
+    setRouteErr(null);
+    onRouteGeo(null);
+  }
+
+  const distKm = routeInfo ? (routeInfo.distance / 1000).toFixed(1) : null;
+  const durMin = routeInfo ? Math.round(routeInfo.duration / 60) : null;
 
   return (
     <>
@@ -154,126 +288,195 @@ export default function ControlPanel({
         </div>
 
         <div className="scroll-thin flex-1 overflow-y-auto px-4 py-4">
-          {/* Busqueda */}
-          <form onSubmit={buscar} className="relative">
-            <input
-              value={busqueda}
-              onChange={(e) => setBusqueda(e.target.value)}
-              placeholder="Buscar dirección — ej: Av. Cabildo 1234"
-              className="w-full rounded-xl border border-line bg-panel-soft py-2.5 pl-3 pr-10 text-sm text-ink outline-none placeholder:text-muted focus:border-accent"
-            />
-            <button
-              type="submit"
-              aria-label="Buscar"
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-muted transition hover:text-accent"
-            >
-              {buscando ? (
-                <span className="block h-4 w-4 animate-spin-slow rounded-full border-2 border-line border-t-accent" />
-              ) : (
-                "🔍"
-              )}
-            </button>
-          </form>
+          {/* ── Búsqueda ── */}
+          <div className="relative">
+            <form onSubmit={buscar}>
+              <input
+                value={busqueda}
+                onChange={(e) => {
+                  setBusqueda(e.target.value);
+                  sugSearch.setShow(true);
+                }}
+                onFocus={() => sugSearch.items.length > 0 && sugSearch.setShow(true)}
+                onBlur={() => setTimeout(() => sugSearch.setShow(false), 150)}
+                placeholder="Buscar dirección — ej: Av. Cabildo 1234"
+                className="w-full rounded-xl border border-line bg-panel-soft py-2.5 pl-3 pr-10 text-sm text-ink outline-none placeholder:text-muted focus:border-accent"
+              />
+              <button
+                type="submit"
+                aria-label="Buscar"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-muted transition hover:text-accent"
+              >
+                {buscando ? (
+                  <span className="block h-4 w-4 animate-spin-slow rounded-full border-2 border-line border-t-accent" />
+                ) : (
+                  "🔍"
+                )}
+              </button>
+            </form>
+            {sugSearch.show && (
+              <SugDropdown
+                items={sugSearch.items}
+                onSelect={seleccionarSugSearch}
+              />
+            )}
+          </div>
           {msg && <p className="mt-1.5 text-xs text-amber-400">{msg}</p>}
 
-          {/* Resultado de busqueda */}
+          {/* Resultado de búsqueda */}
           {searchResult && (
             <div className="animate-fade-up mt-2 flex items-center gap-2 rounded-xl border border-accent/30 bg-accent/10 px-3 py-2">
               <span className="text-base">🎯</span>
               <span className="min-w-0 flex-1 truncate text-sm text-ink">
                 {searchResult.label}
               </span>
-              <a
-                href={`https://www.google.com/maps/dir/?api=1&destination=${searchResult.lat},${searchResult.lng}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="shrink-0 rounded-lg bg-accent/20 px-2 py-1 text-xs font-semibold text-accent transition hover:bg-accent/30"
-                title="Cómo llegar"
-              >
-                Cómo llegar
-              </a>
               <button
                 onClick={onClearSearch}
                 aria-label="Borrar búsqueda"
                 className="shrink-0 rounded-lg px-1.5 py-1 text-muted transition hover:text-red-400"
+                title="Borrar dirección"
               >
                 ✕
               </button>
             </div>
           )}
 
-          {/* Ruta A → B */}
+          {/* ── Cómo llegar ── */}
           <h2 className="mb-2 mt-5 text-xs font-semibold uppercase tracking-wider text-muted">
-            🗺️ Cómo llegar
+            Cómo llegar
           </h2>
           <div className="flex flex-col gap-1.5">
-            <form onSubmit={buscarRutaA} className="relative">
-              <input
-                value={routeA.text}
-                onChange={(e) => setRouteA({ text: e.target.value, coords: null })}
-                placeholder="Desde — dirección de origen"
-                className={`w-full rounded-xl border py-2.5 pl-3 pr-10 text-sm text-ink outline-none placeholder:text-muted focus:border-accent ${
-                  routeA.coords ? "border-accent/50 bg-accent/10" : "border-line bg-panel-soft"
-                }`}
-              />
+            {/* Dirección A */}
+            <div className="relative">
+              <form onSubmit={submitA}>
+                <input
+                  value={textA}
+                  onChange={(e) => {
+                    setTextA(e.target.value);
+                    setCoordsA(null);
+                    sugA.setShow(true);
+                  }}
+                  onFocus={() => sugA.items.length > 0 && sugA.setShow(true)}
+                  onBlur={() => setTimeout(() => sugA.setShow(false), 150)}
+                  placeholder="Desde — dirección de origen"
+                  className={`w-full rounded-xl border py-2.5 pl-3 pr-10 text-sm text-ink outline-none placeholder:text-muted focus:border-accent ${
+                    coordsA
+                      ? "border-accent/50 bg-accent/10"
+                      : "border-line bg-panel-soft"
+                  }`}
+                />
+                <button
+                  type="submit"
+                  aria-label="Buscar origen"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-muted transition hover:text-accent"
+                >
+                  {geocodingA ? (
+                    <span className="block h-4 w-4 animate-spin-slow rounded-full border-2 border-line border-t-accent" />
+                  ) : coordsA ? (
+                    <span className="text-accent">✓</span>
+                  ) : (
+                    "🔍"
+                  )}
+                </button>
+              </form>
+              {sugA.show && (
+                <SugDropdown
+                  items={sugA.items}
+                  onSelect={(s) => {
+                    setTextA(s);
+                    sugA.setShow(false);
+                    geocodearA(s);
+                  }}
+                />
+              )}
+            </div>
+
+            {/* Dirección B */}
+            <div className="relative">
+              <form onSubmit={submitB}>
+                <input
+                  value={textB}
+                  onChange={(e) => {
+                    setTextB(e.target.value);
+                    setCoordsB(null);
+                    sugB.setShow(true);
+                  }}
+                  onFocus={() => sugB.items.length > 0 && sugB.setShow(true)}
+                  onBlur={() => setTimeout(() => sugB.setShow(false), 150)}
+                  placeholder="Hasta — dirección de destino"
+                  className={`w-full rounded-xl border py-2.5 pl-3 pr-10 text-sm text-ink outline-none placeholder:text-muted focus:border-accent ${
+                    coordsB
+                      ? "border-accent/50 bg-accent/10"
+                      : "border-line bg-panel-soft"
+                  }`}
+                />
+                <button
+                  type="submit"
+                  aria-label="Buscar destino"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-muted transition hover:text-accent"
+                >
+                  {geocodingB ? (
+                    <span className="block h-4 w-4 animate-spin-slow rounded-full border-2 border-line border-t-accent" />
+                  ) : coordsB ? (
+                    <span className="text-accent">✓</span>
+                  ) : (
+                    "🔍"
+                  )}
+                </button>
+              </form>
+              {sugB.show && (
+                <SugDropdown
+                  items={sugB.items}
+                  onSelect={(s) => {
+                    setTextB(s);
+                    sugB.setShow(false);
+                    geocodearB(s);
+                  }}
+                />
+              )}
+            </div>
+
+            {routeErr && <p className="text-xs text-amber-400">{routeErr}</p>}
+
+            {coordsA && coordsB && !routeInfo && (
               <button
-                type="submit"
-                aria-label="Buscar origen"
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-muted transition hover:text-accent"
+                onClick={calcularRuta}
+                disabled={calculando}
+                className="flex items-center justify-center gap-2 rounded-xl bg-accent py-2 text-sm font-semibold text-black transition hover:brightness-110 disabled:opacity-60"
               >
-                {geocodingA ? (
-                  <span className="block h-4 w-4 animate-spin-slow rounded-full border-2 border-line border-t-accent" />
-                ) : routeA.coords ? (
-                  "✓"
-                ) : (
-                  "🔍"
+                {calculando && (
+                  <span className="block h-4 w-4 animate-spin-slow rounded-full border-2 border-black/30 border-t-black" />
                 )}
+                {calculando ? "Calculando…" : "Ver ruta"}
               </button>
-            </form>
+            )}
 
-            <form onSubmit={buscarRutaB} className="relative">
-              <input
-                value={routeB.text}
-                onChange={(e) => setRouteB({ text: e.target.value, coords: null })}
-                placeholder="Hasta — dirección de destino"
-                className={`w-full rounded-xl border py-2.5 pl-3 pr-10 text-sm text-ink outline-none placeholder:text-muted focus:border-accent ${
-                  routeB.coords ? "border-accent/50 bg-accent/10" : "border-line bg-panel-soft"
-                }`}
-              />
-              <button
-                type="submit"
-                aria-label="Buscar destino"
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-muted transition hover:text-accent"
-              >
-                {geocodingB ? (
-                  <span className="block h-4 w-4 animate-spin-slow rounded-full border-2 border-line border-t-accent" />
-                ) : routeB.coords ? (
-                  "✓"
-                ) : (
-                  "🔍"
-                )}
-              </button>
-            </form>
+            {routeInfo && (
+              <div className="flex items-center gap-2 rounded-xl border border-accent/30 bg-accent/10 px-3 py-2">
+                <span className="text-base">🗺️</span>
+                <div className="flex-1 text-sm text-ink">
+                  <span className="font-semibold">{distKm} km</span>
+                  <span className="mx-1.5 text-muted">·</span>
+                  <span className="text-muted">{durMin} min</span>
+                </div>
+                <button
+                  onClick={limpiarRuta}
+                  className="shrink-0 rounded-lg px-1.5 py-1 text-muted transition hover:text-red-400"
+                  title="Borrar ruta"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
 
-            {routeError && <p className="text-xs text-amber-400">{routeError}</p>}
-
-            {routeUrl ? (
-              <a
-                href={routeUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="rounded-xl bg-accent py-2 text-center text-sm font-semibold text-black transition hover:brightness-110"
-              >
-                Ver ruta en Google Maps
-              </a>
-            ) : (
+            {!coordsA && !coordsB && !routeInfo && (
               <p className="text-xs text-muted">
-                Ingresá origen y destino para calcular la ruta.
+                Ingresá origen y destino para trazar la ruta en el mapa.
               </p>
             )}
           </div>
 
-          {/* Capas del mapa (colapsable) */}
+          {/* ── Capas del mapa (colapsable) ── */}
           <button
             onClick={() => setCapasAbiertas((v) => !v)}
             className="mb-2 mt-5 flex w-full items-center justify-between text-xs font-semibold uppercase tracking-wider text-muted transition hover:text-ink"
@@ -297,9 +500,7 @@ export default function ControlPanel({
                   >
                     <span
                       className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-base"
-                      style={{
-                        background: on ? `${l.color}22` : "transparent",
-                      }}
+                      style={{ background: on ? `${l.color}22` : "transparent" }}
                     >
                       {l.emoji}
                     </span>
@@ -354,7 +555,7 @@ export default function ControlPanel({
           </h2>
           <SubteStatus />
 
-          {/* Domicilios favoritos */}
+          {/* Mis domicilios */}
           <h2 className="mb-2 mt-5 text-xs font-semibold uppercase tracking-wider text-muted">
             Mis domicilios
           </h2>

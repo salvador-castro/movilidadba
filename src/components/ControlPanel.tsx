@@ -6,6 +6,11 @@ import { LAYERS } from "@/lib/layers";
 import type { Favorito, LayerKey, LayerVisibility } from "@/lib/types";
 import SubteStatus from "./SubteStatus";
 
+interface RoutePoint {
+  text: string;
+  coords: { lat: number; lng: number } | null;
+}
+
 interface Props {
   visibility: LayerVisibility;
   onToggle: (key: LayerKey) => void;
@@ -18,6 +23,8 @@ interface Props {
   onDeleteFav: (id: string) => void;
   onStartPlacing: () => void;
   onSignOut: () => void;
+  searchResult: { lng: number; lat: number; label: string } | null;
+  onClearSearch: () => void;
 }
 
 export default function ControlPanel({
@@ -32,11 +39,21 @@ export default function ControlPanel({
   onDeleteFav,
   onStartPlacing,
   onSignOut,
+  searchResult,
+  onClearSearch,
 }: Props) {
   const [abierto, setAbierto] = useState(true);
   const [busqueda, setBusqueda] = useState("");
   const [buscando, setBuscando] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [capasAbiertas, setCapasAbiertas] = useState(false);
+
+  // Route A -> B
+  const [routeA, setRouteA] = useState<RoutePoint>({ text: "", coords: null });
+  const [routeB, setRouteB] = useState<RoutePoint>({ text: "", coords: null });
+  const [geocodingA, setGeocodingA] = useState(false);
+  const [geocodingB, setGeocodingB] = useState(false);
+  const [routeError, setRouteError] = useState<string | null>(null);
 
   async function buscar(e: React.FormEvent) {
     e.preventDefault();
@@ -48,9 +65,54 @@ export default function ControlPanel({
     if (!r.ok) setMsg(r.message ?? "No se encontró la dirección.");
   }
 
+  async function geocodeAddr(addr: string): Promise<{ lat: number; lng: number; label: string } | null> {
+    try {
+      const res = await fetch(`/api/geocoder?direccion=${encodeURIComponent(addr)}`);
+      const data = await res.json();
+      if (!res.ok) return null;
+      return { lat: data.lat, lng: data.lng, label: data.label };
+    } catch {
+      return null;
+    }
+  }
+
+  async function buscarRutaA(e: React.FormEvent) {
+    e.preventDefault();
+    if (!routeA.text.trim() || geocodingA) return;
+    setGeocodingA(true);
+    setRouteError(null);
+    const coords = await geocodeAddr(routeA.text.trim());
+    setGeocodingA(false);
+    if (coords) {
+      setRouteA((prev) => ({ ...prev, coords }));
+      onFlyTo(coords.lng, coords.lat);
+    } else {
+      setRouteError("No se encontró la dirección de origen.");
+    }
+  }
+
+  async function buscarRutaB(e: React.FormEvent) {
+    e.preventDefault();
+    if (!routeB.text.trim() || geocodingB) return;
+    setGeocodingB(true);
+    setRouteError(null);
+    const coords = await geocodeAddr(routeB.text.trim());
+    setGeocodingB(false);
+    if (coords) {
+      setRouteB((prev) => ({ ...prev, coords }));
+      onFlyTo(coords.lng, coords.lat);
+    } else {
+      setRouteError("No se encontró la dirección de destino.");
+    }
+  }
+
+  const routeUrl =
+    routeA.coords && routeB.coords
+      ? `https://www.google.com/maps/dir/${routeA.coords.lat},${routeA.coords.lng}/${routeB.coords.lat},${routeB.coords.lng}`
+      : null;
+
   return (
     <>
-      {/* Boton flotante para reabrir en mobile */}
       {!abierto && (
         <button
           onClick={() => setAbierto(true)}
@@ -114,62 +176,165 @@ export default function ControlPanel({
           </form>
           {msg && <p className="mt-1.5 text-xs text-amber-400">{msg}</p>}
 
-          {/* Capas */}
+          {/* Resultado de busqueda */}
+          {searchResult && (
+            <div className="animate-fade-up mt-2 flex items-center gap-2 rounded-xl border border-accent/30 bg-accent/10 px-3 py-2">
+              <span className="text-base">🎯</span>
+              <span className="min-w-0 flex-1 truncate text-sm text-ink">
+                {searchResult.label}
+              </span>
+              <a
+                href={`https://www.google.com/maps/dir/?api=1&destination=${searchResult.lat},${searchResult.lng}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="shrink-0 rounded-lg bg-accent/20 px-2 py-1 text-xs font-semibold text-accent transition hover:bg-accent/30"
+                title="Cómo llegar"
+              >
+                Cómo llegar
+              </a>
+              <button
+                onClick={onClearSearch}
+                aria-label="Borrar búsqueda"
+                className="shrink-0 rounded-lg px-1.5 py-1 text-muted transition hover:text-red-400"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
+          {/* Ruta A → B */}
           <h2 className="mb-2 mt-5 text-xs font-semibold uppercase tracking-wider text-muted">
-            Capas del mapa
+            🗺️ Cómo llegar
           </h2>
           <div className="flex flex-col gap-1.5">
-            {LAYERS.map((l) => {
-              const on = visibility[l.key];
-              return (
-                <button
-                  key={l.key}
-                  onClick={() => onToggle(l.key)}
-                  className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition ${
-                    on
-                      ? "border-line bg-panel-soft"
-                      : "border-transparent bg-panel-soft/40 hover:bg-panel-soft"
-                  }`}
-                >
-                  <span
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-base"
-                    style={{
-                      background: on ? `${l.color}22` : "transparent",
-                    }}
-                  >
-                    {l.emoji}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-1.5">
-                      <span className="text-sm font-semibold text-ink">
-                        {l.label}
-                      </span>
-                      {l.kind === "live" && (
-                        <span className="flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase text-emerald-400">
-                          <span className="live-dot h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                          Vivo
-                        </span>
-                      )}
-                    </span>
-                    <span className="block truncate text-xs text-muted">
-                      {l.description}
-                    </span>
-                  </span>
-                  <span
-                    className={`relative h-5 w-9 shrink-0 rounded-full transition ${
-                      on ? "bg-accent" : "bg-line"
+            <form onSubmit={buscarRutaA} className="relative">
+              <input
+                value={routeA.text}
+                onChange={(e) => setRouteA({ text: e.target.value, coords: null })}
+                placeholder="Desde — dirección de origen"
+                className={`w-full rounded-xl border py-2.5 pl-3 pr-10 text-sm text-ink outline-none placeholder:text-muted focus:border-accent ${
+                  routeA.coords ? "border-accent/50 bg-accent/10" : "border-line bg-panel-soft"
+                }`}
+              />
+              <button
+                type="submit"
+                aria-label="Buscar origen"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-muted transition hover:text-accent"
+              >
+                {geocodingA ? (
+                  <span className="block h-4 w-4 animate-spin-slow rounded-full border-2 border-line border-t-accent" />
+                ) : routeA.coords ? (
+                  "✓"
+                ) : (
+                  "🔍"
+                )}
+              </button>
+            </form>
+
+            <form onSubmit={buscarRutaB} className="relative">
+              <input
+                value={routeB.text}
+                onChange={(e) => setRouteB({ text: e.target.value, coords: null })}
+                placeholder="Hasta — dirección de destino"
+                className={`w-full rounded-xl border py-2.5 pl-3 pr-10 text-sm text-ink outline-none placeholder:text-muted focus:border-accent ${
+                  routeB.coords ? "border-accent/50 bg-accent/10" : "border-line bg-panel-soft"
+                }`}
+              />
+              <button
+                type="submit"
+                aria-label="Buscar destino"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-muted transition hover:text-accent"
+              >
+                {geocodingB ? (
+                  <span className="block h-4 w-4 animate-spin-slow rounded-full border-2 border-line border-t-accent" />
+                ) : routeB.coords ? (
+                  "✓"
+                ) : (
+                  "🔍"
+                )}
+              </button>
+            </form>
+
+            {routeError && <p className="text-xs text-amber-400">{routeError}</p>}
+
+            {routeUrl ? (
+              <a
+                href={routeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-xl bg-accent py-2 text-center text-sm font-semibold text-black transition hover:brightness-110"
+              >
+                Ver ruta en Google Maps
+              </a>
+            ) : (
+              <p className="text-xs text-muted">
+                Ingresá origen y destino para calcular la ruta.
+              </p>
+            )}
+          </div>
+
+          {/* Capas del mapa (colapsable) */}
+          <button
+            onClick={() => setCapasAbiertas((v) => !v)}
+            className="mb-2 mt-5 flex w-full items-center justify-between text-xs font-semibold uppercase tracking-wider text-muted transition hover:text-ink"
+          >
+            <span>Capas del mapa</span>
+            <span className="text-base leading-none">{capasAbiertas ? "▲" : "▼"}</span>
+          </button>
+          {capasAbiertas && (
+            <div className="flex flex-col gap-1.5">
+              {LAYERS.map((l) => {
+                const on = visibility[l.key];
+                return (
+                  <button
+                    key={l.key}
+                    onClick={() => onToggle(l.key)}
+                    className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition ${
+                      on
+                        ? "border-line bg-panel-soft"
+                        : "border-transparent bg-panel-soft/40 hover:bg-panel-soft"
                     }`}
                   >
                     <span
-                      className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
-                        on ? "left-[18px]" : "left-0.5"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-base"
+                      style={{
+                        background: on ? `${l.color}22` : "transparent",
+                      }}
+                    >
+                      {l.emoji}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-1.5">
+                        <span className="text-sm font-semibold text-ink">
+                          {l.label}
+                        </span>
+                        {l.kind === "live" && (
+                          <span className="flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase text-emerald-400">
+                            <span className="live-dot h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                            Vivo
+                          </span>
+                        )}
+                      </span>
+                      <span className="block truncate text-xs text-muted">
+                        {l.description}
+                      </span>
+                    </span>
+                    <span
+                      className={`relative h-5 w-9 shrink-0 rounded-full transition ${
+                        on ? "bg-accent" : "bg-line"
                       }`}
-                    />
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+                    >
+                      <span
+                        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
+                          on ? "left-[18px]" : "left-0.5"
+                        }`}
+                      />
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {/* Filtro de colectivos */}
           {visibility.colectivos && (

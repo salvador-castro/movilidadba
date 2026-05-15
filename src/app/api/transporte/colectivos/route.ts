@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
         (v) =>
           Number.isFinite(v.latitude) &&
           Number.isFinite(v.longitude) &&
-          (!linea || v.route_short_name?.toLowerCase() === linea),
+          (!linea || v.route_short_name?.trim().toLowerCase() === linea),
       )
       .map((v) => ({
         type: "Feature" as const,

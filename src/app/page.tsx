@@ -95,6 +95,10 @@ export default function Home() {
     setFlyTarget({ lng, lat, zoom: 16 });
   }, []);
 
+  const clearSearch = useCallback(() => {
+    setSearchResult(null);
+  }, []);
+
   const handlePick = useCallback((lng: number, lat: number) => {
     setPlacing(false);
     setPendingFav({ lng, lat });
@@ -157,6 +161,8 @@ export default function Home() {
             setSel(null);
           }}
           onSignOut={signOut}
+          searchResult={searchResult}
+          onClearSearch={clearSearch}
         />
 
         {/* Banner de modo "colocar pin" */}

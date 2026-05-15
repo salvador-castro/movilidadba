@@ -28,6 +28,8 @@ const POINT_LAYERS = [
   "lyr-taxis",
   "lyr-ecobici",
   "lyr-colectivos",
+  "lyr-subte-labels",
+  "lyr-ecobici-labels",
 ];
 
 interface Props {
@@ -188,6 +190,25 @@ export default function MapView({
           "circle-stroke-color": "#0b0c12",
         },
       });
+      map.addLayer({
+        id: "lyr-subte-labels",
+        type: "symbol",
+        source: "src-subte-est",
+        minzoom: 14,
+        layout: {
+          "text-field": ["coalesce", ["get", "estacion"], ""],
+          "text-size": 11,
+          "text-offset": [0, 1.3],
+          "text-anchor": "top",
+          "text-font": ["Noto Sans Regular"],
+          "text-max-width": 8,
+        },
+        paint: {
+          "text-color": "#e2e8f0",
+          "text-halo-color": "#0b0c12",
+          "text-halo-width": 1.5,
+        },
+      });
     }
 
     if (key === "trenes") {
@@ -285,6 +306,25 @@ export default function MapView({
           ],
           "circle-stroke-width": 1.6,
           "circle-stroke-color": "#0b0c12",
+        },
+      });
+      map.addLayer({
+        id: "lyr-ecobici-labels",
+        type: "symbol",
+        source: "src-ecobici",
+        minzoom: 14,
+        layout: {
+          "text-field": ["coalesce", ["get", "name"], ""],
+          "text-size": 10,
+          "text-offset": [0, 1.3],
+          "text-anchor": "top",
+          "text-font": ["Noto Sans Regular"],
+          "text-max-width": 10,
+        },
+        paint: {
+          "text-color": "#86efac",
+          "text-halo-color": "#0b0c12",
+          "text-halo-width": 1.5,
         },
       });
     }
@@ -508,7 +548,7 @@ function clickLayerId(key: LayerKey): string | null {
 function layerIdsOf(key: LayerKey): string[] {
   switch (key) {
     case "subte":
-      return ["lyr-subte-red", "lyr-subte-est"];
+      return ["lyr-subte-red", "lyr-subte-est", "lyr-subte-labels"];
     case "trenes":
       return ["lyr-trenes-red", "lyr-trenes-est"];
     case "ciclovias":
@@ -518,7 +558,7 @@ function layerIdsOf(key: LayerKey): string[] {
     case "taxis":
       return ["lyr-taxis"];
     case "ecobici":
-      return ["lyr-ecobici"];
+      return ["lyr-ecobici", "lyr-ecobici-labels"];
     case "colectivos":
       return ["lyr-colectivos"];
   }

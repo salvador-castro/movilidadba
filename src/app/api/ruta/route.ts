@@ -19,8 +19,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Faltan parámetros" }, { status: 400 });
   }
 
+  const mode = sp.get("mode") ?? "foot";
   const url =
-    `https://router.project-osrm.org/route/v1/driving/` +
+    `https://router.project-osrm.org/route/v1/${mode}/` +
     `${olng},${olat};${dlng},${dlat}?overview=full&geometries=geojson`;
 
   try {

@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { LAYERS } from "@/lib/layers";
 import type { Favorito, LayerKey, LayerVisibility } from "@/lib/types";
 import SubteStatus from "./SubteStatus";
+import TrenStatus from "./TrenStatus";
 
 type RouteGeometry = { type: "LineString"; coordinates: [number, number][] };
 
@@ -25,12 +26,27 @@ interface Props {
   onRouteGeo: (geo: RouteGeometry | null) => void;
 }
 
+const MODOS_TRANSITO: {
+  id: string;
+  emoji: string;
+  label: string;
+  layerKey: LayerKey | null;
+  calcMin: (distKm: number, walkMin: number) => number;
+}[] = [
+  { id: "colectivo", emoji: "🚌", label: "Colectivo", layerKey: "colectivos",
+    calcMin: (distKm) => Math.max(8, Math.round(distKm * 4 + 5)) },
+  { id: "subte", emoji: "🚇", label: "Subte", layerKey: "subte",
+    calcMin: (distKm) => Math.max(12, Math.round(distKm * 1.8 + 10)) },
+  { id: "tren", emoji: "🚂", label: "Tren", layerKey: "trenes",
+    calcMin: (distKm) => Math.max(20, Math.round(distKm * 1.2 + 15)) },
+  { id: "walking", emoji: "🚶", label: "Caminando", layerKey: null,
+    calcMin: (_distKm, walkMin) => walkMin },
+];
+
 async function fetchSugs(text: string): Promise<string[]> {
   if (text.length < 3) return [];
   try {
-    const res = await fetch(
-      `/api/geocoder?sugerencias=${encodeURIComponent(text)}`,
-    );
+    const res = await fetch(`/api/geocoder?sugerencias=${encodeURIComponent(text)}`);
     const data = await res.json() as { resultados?: string[] };
     return data.resultados ?? [];
   } catch {
@@ -38,13 +54,9 @@ async function fetchSugs(text: string): Promise<string[]> {
   }
 }
 
-async function geocodeAddr(
-  addr: string,
-): Promise<{ lat: number; lng: number } | null> {
+async function geocodeAddr(addr: string): Promise<{ lat: number; lng: number } | null> {
   try {
-    const res = await fetch(
-      `/api/geocoder?direccion=${encodeURIComponent(addr)}`,
-    );
+    const res = await fetch(`/api/geocoder?direccion=${encodeURIComponent(addr)}`);
     const data = await res.json() as { lat?: number; lng?: number };
     if (!res.ok || !data.lat) return null;
     return { lat: data.lat, lng: data.lng! };
@@ -56,8 +68,14 @@ async function geocodeAddr(
 function useSugerencias(text: string) {
   const [items, setItems] = useState<string[]>([]);
   const [show, setShow] = useState(false);
+  const lockedRef = useRef(false);
 
   useEffect(() => {
+    if (lockedRef.current) {
+      lockedRef.current = false;
+      setItems([]);
+      return;
+    }
     if (text.length < 3) {
       setItems([]);
       return;
@@ -70,27 +88,22 @@ function useSugerencias(text: string) {
     return () => clearTimeout(t);
   }, [text]);
 
-  return { items, show, setShow };
+  function lock() {
+    lockedRef.current = true;
+  }
+
+  return { items, show, setShow, lock };
 }
 
-function SugDropdown({
-  items,
-  onSelect,
-}: {
-  items: string[];
-  onSelect: (s: string) => void;
-}) {
+function SugDropdown({ items, onSelect }: { items: string[]; onSelect: (s: string) => void }) {
   if (!items.length) return null;
   return (
     <ul className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-xl border border-line bg-panel-soft shadow-xl">
       {items.map((s, i) => (
         <li key={i}>
           <button
-            onMouseDown={(e) => {
-              e.preventDefault();
-              onSelect(s);
-            }}
-            className="w-full px-3 py-2 text-left text-sm text-ink transition hover:bg-panel-soft"
+            onMouseDown={(e) => { e.preventDefault(); onSelect(s); }}
+            className="w-full px-3 py-2 text-left text-sm text-ink transition hover:bg-accent/10"
           >
             {s}
           </button>
@@ -133,8 +146,11 @@ export default function ControlPanel({
   const [geocodingA, setGeocodingA] = useState(false);
   const [geocodingB, setGeocodingB] = useState(false);
   const [calculando, setCalculando] = useState(false);
-  const [routeInfo, setRouteInfo] = useState<{ distance: number; duration: number } | null>(null);
   const [routeErr, setRouteErr] = useState<string | null>(null);
+  const [modoSel, setModoSel] = useState<string | null>(null);
+  const [modosResult, setModosResult] = useState<
+    { id: string; emoji: string; label: string; minutos: number; layerKey: LayerKey | null }[] | null
+  >(null);
   const sugA = useSugerencias(textA);
   const sugB = useSugerencias(textB);
 
@@ -151,6 +167,7 @@ export default function ControlPanel({
 
   async function seleccionarSugSearch(s: string) {
     setBusqueda(s);
+    sugSearch.lock();
     sugSearch.setShow(false);
     setBuscando(true);
     setMsg(null);
@@ -199,13 +216,27 @@ export default function ControlPanel({
     await geocodearB(textB.trim());
   }
 
-  async function calcularRuta() {
+  function swapAB() {
+    setTextA(textB);
+    setTextB(textA);
+    setCoordsA(coordsB);
+    setCoordsB(coordsA);
+    sugA.lock();
+    sugB.lock();
+    setModosResult(null);
+    setModoSel(null);
+    onRouteGeo(null);
+  }
+
+  async function calcularOpciones() {
     if (!coordsA || !coordsB || calculando) return;
     setCalculando(true);
     setRouteErr(null);
+    setModosResult(null);
+    setModoSel(null);
     try {
       const res = await fetch(
-        `/api/ruta?olng=${coordsA.lng}&olat=${coordsA.lat}&dlng=${coordsB.lng}&dlat=${coordsB.lat}`,
+        `/api/ruta?olng=${coordsA.lng}&olat=${coordsA.lat}&dlng=${coordsB.lng}&dlat=${coordsB.lat}&mode=foot`,
       );
       const data = await res.json() as {
         geometry?: RouteGeometry;
@@ -217,13 +248,21 @@ export default function ControlPanel({
         setRouteErr(data.error ?? "No se pudo calcular la ruta.");
       } else {
         onRouteGeo(data.geometry);
-        setRouteInfo({ distance: data.distance!, duration: data.duration! });
-        // Fly to midpoint at zoom 13 to show the full route
         onFlyTo(
           (coordsA.lng + coordsB.lng) / 2,
           (coordsA.lat + coordsB.lat) / 2,
           13,
         );
+        const distKm = (data.distance ?? 0) / 1000;
+        const walkMin = Math.round((data.duration ?? 0) / 60);
+        const modos = MODOS_TRANSITO.map((m) => ({
+          id: m.id,
+          emoji: m.emoji,
+          label: m.label,
+          layerKey: m.layerKey,
+          minutos: m.calcMin(distKm, walkMin),
+        })).sort((a, b) => a.minutos - b.minutos);
+        setModosResult(modos);
       }
     } catch {
       setRouteErr("Error de conexión al calcular la ruta.");
@@ -232,18 +271,23 @@ export default function ControlPanel({
     }
   }
 
+  function seleccionarModo(modo: { id: string; layerKey: LayerKey | null }) {
+    setModoSel(modo.id);
+    if (modo.layerKey && !visibility[modo.layerKey]) {
+      onToggle(modo.layerKey);
+    }
+  }
+
   function limpiarRuta() {
     setTextA("");
     setTextB("");
     setCoordsA(null);
     setCoordsB(null);
-    setRouteInfo(null);
+    setModosResult(null);
+    setModoSel(null);
     setRouteErr(null);
     onRouteGeo(null);
   }
-
-  const distKm = routeInfo ? (routeInfo.distance / 1000).toFixed(1) : null;
-  const durMin = routeInfo ? Math.round(routeInfo.duration / 60) : null;
 
   return (
     <>
@@ -265,17 +309,12 @@ export default function ControlPanel({
         <div className="flex items-center gap-3 border-b border-line px-4 py-4">
           <div
             className="flex h-10 w-10 items-center justify-center rounded-xl text-xl"
-            style={{
-              background:
-                "linear-gradient(135deg,var(--color-accent),var(--color-accent-2))",
-            }}
+            style={{ background: "linear-gradient(135deg,var(--color-accent),var(--color-accent-2))" }}
           >
             🚇
           </div>
           <div className="flex-1">
-            <h1 className="text-[15px] font-bold leading-tight text-ink">
-              Movilidad BA
-            </h1>
+            <h1 className="text-[15px] font-bold leading-tight text-ink">Movilidad BA</h1>
             <p className="text-xs text-muted">Cómo moverte por la Ciudad</p>
           </div>
           <button
@@ -288,7 +327,11 @@ export default function ControlPanel({
         </div>
 
         <div className="scroll-thin flex-1 overflow-y-auto px-4 py-4">
+
           {/* ── Búsqueda ── */}
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">
+            Buscar dirección
+          </label>
           <div className="relative">
             <form onSubmit={buscar}>
               <input
@@ -299,7 +342,7 @@ export default function ControlPanel({
                 }}
                 onFocus={() => sugSearch.items.length > 0 && sugSearch.setShow(true)}
                 onBlur={() => setTimeout(() => sugSearch.setShow(false), 150)}
-                placeholder="Buscar dirección — ej: Av. Cabildo 1234"
+                placeholder="Ingrese dirección"
                 className="w-full rounded-xl border border-line bg-panel-soft py-2.5 pl-3 pr-10 text-sm text-ink outline-none placeholder:text-muted focus:border-accent"
               />
               <button
@@ -315,10 +358,7 @@ export default function ControlPanel({
               </button>
             </form>
             {sugSearch.show && (
-              <SugDropdown
-                items={sugSearch.items}
-                onSelect={seleccionarSugSearch}
-              />
+              <SugDropdown items={sugSearch.items} onSelect={seleccionarSugSearch} />
             )}
           </div>
           {msg && <p className="mt-1.5 text-xs text-amber-400">{msg}</p>}
@@ -327,14 +367,11 @@ export default function ControlPanel({
           {searchResult && (
             <div className="animate-fade-up mt-2 flex items-center gap-2 rounded-xl border border-accent/30 bg-accent/10 px-3 py-2">
               <span className="text-base">🎯</span>
-              <span className="min-w-0 flex-1 truncate text-sm text-ink">
-                {searchResult.label}
-              </span>
+              <span className="min-w-0 flex-1 truncate text-sm text-ink">{searchResult.label}</span>
               <button
                 onClick={onClearSearch}
                 aria-label="Borrar búsqueda"
                 className="shrink-0 rounded-lg px-1.5 py-1 text-muted transition hover:text-red-400"
-                title="Borrar dirección"
               >
                 ✕
               </button>
@@ -355,14 +392,14 @@ export default function ControlPanel({
                     setTextA(e.target.value);
                     setCoordsA(null);
                     sugA.setShow(true);
+                    setModosResult(null);
+                    setModoSel(null);
                   }}
                   onFocus={() => sugA.items.length > 0 && sugA.setShow(true)}
                   onBlur={() => setTimeout(() => sugA.setShow(false), 150)}
                   placeholder="Desde — dirección de origen"
                   className={`w-full rounded-xl border py-2.5 pl-3 pr-10 text-sm text-ink outline-none placeholder:text-muted focus:border-accent ${
-                    coordsA
-                      ? "border-accent/50 bg-accent/10"
-                      : "border-line bg-panel-soft"
+                    coordsA ? "border-accent/50 bg-accent/10" : "border-line bg-panel-soft"
                   }`}
                 />
                 <button
@@ -384,11 +421,25 @@ export default function ControlPanel({
                   items={sugA.items}
                   onSelect={(s) => {
                     setTextA(s);
+                    sugA.lock();
                     sugA.setShow(false);
+                    setModosResult(null);
+                    setModoSel(null);
                     geocodearA(s);
                   }}
                 />
               )}
+            </div>
+
+            {/* Swap button */}
+            <div className="flex justify-center">
+              <button
+                onClick={swapAB}
+                title="Intercambiar origen y destino"
+                className="rounded-lg border border-line px-3 py-1 text-sm text-muted transition hover:border-accent hover:text-accent"
+              >
+                ⇅
+              </button>
             </div>
 
             {/* Dirección B */}
@@ -400,14 +451,14 @@ export default function ControlPanel({
                     setTextB(e.target.value);
                     setCoordsB(null);
                     sugB.setShow(true);
+                    setModosResult(null);
+                    setModoSel(null);
                   }}
                   onFocus={() => sugB.items.length > 0 && sugB.setShow(true)}
                   onBlur={() => setTimeout(() => sugB.setShow(false), 150)}
                   placeholder="Hasta — dirección de destino"
                   className={`w-full rounded-xl border py-2.5 pl-3 pr-10 text-sm text-ink outline-none placeholder:text-muted focus:border-accent ${
-                    coordsB
-                      ? "border-accent/50 bg-accent/10"
-                      : "border-line bg-panel-soft"
+                    coordsB ? "border-accent/50 bg-accent/10" : "border-line bg-panel-soft"
                   }`}
                 />
                 <button
@@ -429,7 +480,10 @@ export default function ControlPanel({
                   items={sugB.items}
                   onSelect={(s) => {
                     setTextB(s);
+                    sugB.lock();
                     sugB.setShow(false);
+                    setModosResult(null);
+                    setModoSel(null);
                     geocodearB(s);
                   }}
                 />
@@ -438,40 +492,71 @@ export default function ControlPanel({
 
             {routeErr && <p className="text-xs text-amber-400">{routeErr}</p>}
 
-            {coordsA && coordsB && !routeInfo && (
+            {/* Calcular button */}
+            {coordsA && coordsB && !modosResult && !calculando && (
               <button
-                onClick={calcularRuta}
-                disabled={calculando}
-                className="flex items-center justify-center gap-2 rounded-xl bg-accent py-2 text-sm font-semibold text-black transition hover:brightness-110 disabled:opacity-60"
+                onClick={calcularOpciones}
+                className="flex items-center justify-center gap-2 rounded-xl bg-accent py-2 text-sm font-semibold text-black transition hover:brightness-110"
               >
-                {calculando && (
-                  <span className="block h-4 w-4 animate-spin-slow rounded-full border-2 border-black/30 border-t-black" />
-                )}
-                {calculando ? "Calculando…" : "Ver ruta"}
+                Ver opciones de viaje
               </button>
             )}
 
-            {routeInfo && (
-              <div className="flex items-center gap-2 rounded-xl border border-accent/30 bg-accent/10 px-3 py-2">
-                <span className="text-base">🗺️</span>
-                <div className="flex-1 text-sm text-ink">
-                  <span className="font-semibold">{distKm} km</span>
-                  <span className="mx-1.5 text-muted">·</span>
-                  <span className="text-muted">{durMin} min</span>
-                </div>
-                <button
-                  onClick={limpiarRuta}
-                  className="shrink-0 rounded-lg px-1.5 py-1 text-muted transition hover:text-red-400"
-                  title="Borrar ruta"
-                >
-                  ✕
-                </button>
+            {calculando && (
+              <div className="flex items-center justify-center gap-2 py-2 text-sm text-muted">
+                <span className="block h-4 w-4 animate-spin-slow rounded-full border-2 border-line border-t-accent" />
+                Calculando…
               </div>
             )}
 
-            {!coordsA && !coordsB && !routeInfo && (
+            {/* Modo cards */}
+            {modosResult && (
+              <>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {modosResult.map((m, idx) => {
+                    const selected = modoSel === m.id;
+                    const isFirst = idx === 0;
+                    return (
+                      <button
+                        key={m.id}
+                        onClick={() => seleccionarModo(m)}
+                        className={`relative flex flex-col items-center gap-1 rounded-xl border px-3 py-2.5 text-center transition ${
+                          selected
+                            ? "border-accent bg-accent/15"
+                            : "border-line bg-panel-soft hover:border-accent/40"
+                        }`}
+                      >
+                        {isFirst && !modoSel && (
+                          <span className="absolute -top-2 left-1/2 -translate-x-1/2 rounded bg-accent px-1.5 py-0.5 text-[9px] font-bold uppercase text-black">
+                            Más rápido
+                          </span>
+                        )}
+                        <span className="text-xl">{m.emoji}</span>
+                        <span className="text-xs font-semibold text-ink">{m.label}</span>
+                        <span className={`text-xs font-bold ${selected ? "text-accent" : "text-muted"}`}>
+                          ~{m.minutos} min
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {modoSel && (
+                  <p className="text-center text-xs text-muted">
+                    La capa correspondiente se activó en el mapa.
+                  </p>
+                )}
+                <button
+                  onClick={limpiarRuta}
+                  className="mt-1 rounded-xl border border-line py-1.5 text-xs font-medium text-muted transition hover:border-red-400/40 hover:text-red-400"
+                >
+                  Borrar ruta
+                </button>
+              </>
+            )}
+
+            {!coordsA && !coordsB && !modosResult && (
               <p className="text-xs text-muted">
-                Ingresá origen y destino para trazar la ruta en el mapa.
+                Ingresá origen y destino para ver las opciones de viaje.
               </p>
             )}
           </div>
@@ -506,9 +591,7 @@ export default function ControlPanel({
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-1.5">
-                        <span className="text-sm font-semibold text-ink">
-                          {l.label}
-                        </span>
+                        <span className="text-sm font-semibold text-ink">{l.label}</span>
                         {l.kind === "live" && (
                           <span className="flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase text-emerald-400">
                             <span className="live-dot h-1.5 w-1.5 rounded-full bg-emerald-400" />
@@ -516,9 +599,7 @@ export default function ControlPanel({
                           </span>
                         )}
                       </span>
-                      <span className="block truncate text-xs text-muted">
-                        {l.description}
-                      </span>
+                      <span className="block truncate text-xs text-muted">{l.description}</span>
                     </span>
                     <span
                       className={`relative h-5 w-9 shrink-0 rounded-full transition ${
@@ -555,6 +636,12 @@ export default function ControlPanel({
           </h2>
           <SubteStatus />
 
+          {/* Estado del tren */}
+          <h2 className="mb-2 mt-5 text-xs font-semibold uppercase tracking-wider text-muted">
+            Estado del tren
+          </h2>
+          <TrenStatus />
+
           {/* Mis domicilios */}
           <h2 className="mb-2 mt-5 text-xs font-semibold uppercase tracking-wider text-muted">
             Mis domicilios
@@ -576,13 +663,9 @@ export default function ControlPanel({
                     onClick={() => onFlyTo(f.lng, f.lat)}
                     className="min-w-0 flex-1 text-left"
                   >
-                    <div className="truncate text-sm font-semibold text-ink">
-                      ⭐ {f.label}
-                    </div>
+                    <div className="truncate text-sm font-semibold text-ink">⭐ {f.label}</div>
                     {f.address && (
-                      <div className="truncate text-xs text-muted">
-                        {f.address}
-                      </div>
+                      <div className="truncate text-xs text-muted">{f.address}</div>
                     )}
                   </button>
                   <button
@@ -624,9 +707,7 @@ export default function ControlPanel({
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-accent/15 text-sm font-bold text-accent">
                 {userEmail[0]?.toUpperCase()}
               </div>
-              <span className="min-w-0 flex-1 truncate text-xs text-muted">
-                {userEmail}
-              </span>
+              <span className="min-w-0 flex-1 truncate text-xs text-muted">{userEmail}</span>
               <button
                 onClick={onSignOut}
                 className="rounded-lg border border-line px-2.5 py-1 text-xs font-medium text-muted transition hover:text-ink"

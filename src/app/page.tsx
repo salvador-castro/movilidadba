@@ -51,6 +51,10 @@ export default function Home() {
     type: "LineString";
     coordinates: [number, number][];
   } | null>(null);
+  const [routePoints, setRoutePoints] = useState<{
+    a: { lng: number; lat: number } | null;
+    b: { lng: number; lat: number } | null;
+  } | null>(null);
 
   /* --- Sesion + favoritos --- */
   const cargarFavoritos = useCallback(async () => {
@@ -146,6 +150,7 @@ export default function Home() {
         searchResult={searchResult}
         flyTarget={flyTarget}
         routeGeo={routeGeo}
+        routePoints={routePoints}
         onSelect={setSel}
         onPick={handlePick}
       />
@@ -169,6 +174,7 @@ export default function Home() {
           searchResult={searchResult}
           onClearSearch={clearSearch}
           onRouteGeo={setRouteGeo}
+          onSetRoutePoints={setRoutePoints}
         />
 
         {/* Banner de modo "colocar pin" */}

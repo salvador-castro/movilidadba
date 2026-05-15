@@ -9,6 +9,14 @@ import TrenStatus from "./TrenStatus";
 
 type RouteGeometry = { type: "LineString"; coordinates: [number, number][] };
 
+interface WalkStep {
+  name: string;
+  maneuver: string;
+  modifier?: string;
+  distance: number;
+  duration: number;
+}
+
 interface Props {
   visibility: LayerVisibility;
   onToggle: (key: LayerKey) => void;
@@ -24,6 +32,9 @@ interface Props {
   searchResult: { lng: number; lat: number; label: string } | null;
   onClearSearch: () => void;
   onRouteGeo: (geo: RouteGeometry | null) => void;
+  onSetRoutePoints: (
+    pts: { a: { lng: number; lat: number } | null; b: { lng: number; lat: number } | null } | null,
+  ) => void;
 }
 
 const MODOS_TRANSITO: {
@@ -33,14 +44,22 @@ const MODOS_TRANSITO: {
   layerKey: LayerKey | null;
   calcMin: (distKm: number, walkMin: number) => number;
 }[] = [
-  { id: "colectivo", emoji: "🚌", label: "Colectivo", layerKey: "colectivos",
-    calcMin: (distKm) => Math.max(8, Math.round(distKm * 4 + 5)) },
-  { id: "subte", emoji: "🚇", label: "Subte", layerKey: "subte",
-    calcMin: (distKm) => Math.max(12, Math.round(distKm * 1.8 + 10)) },
-  { id: "tren", emoji: "🚂", label: "Tren", layerKey: "trenes",
-    calcMin: (distKm) => Math.max(20, Math.round(distKm * 1.2 + 15)) },
-  { id: "walking", emoji: "🚶", label: "Caminando", layerKey: null,
-    calcMin: (_distKm, walkMin) => walkMin },
+  {
+    id: "colectivo", emoji: "🚌", label: "Colectivo", layerKey: "colectivos",
+    calcMin: (distKm) => Math.max(8, Math.round(distKm * 4 + 5)),
+  },
+  {
+    id: "subte", emoji: "🚇", label: "Subte", layerKey: "subte",
+    calcMin: (distKm) => Math.max(12, Math.round(distKm * 1.8 + 10)),
+  },
+  {
+    id: "tren", emoji: "🚂", label: "Tren", layerKey: "trenes",
+    calcMin: (distKm) => Math.max(20, Math.round(distKm * 1.2 + 15)),
+  },
+  {
+    id: "walking", emoji: "🚶", label: "Caminando", layerKey: null,
+    calcMin: (_distKm, walkMin) => walkMin,
+  },
 ];
 
 async function fetchSugs(text: string): Promise<string[]> {
@@ -113,6 +132,58 @@ function SugDropdown({ items, onSelect }: { items: string[]; onSelect: (s: strin
   );
 }
 
+function maneuverIcon(type: string, modifier?: string): string {
+  if (type === "depart") return "🚶";
+  if (type === "arrive") return "📍";
+  if (modifier === "left" || modifier === "sharp left" || modifier === "slight left") return "↰";
+  if (modifier === "right" || modifier === "sharp right" || modifier === "slight right") return "↱";
+  return "↑";
+}
+
+interface Paso {
+  icono: string;
+  texto: string;
+  duracion: number;
+}
+
+function generarPasos(
+  modoId: string,
+  distKm: number,
+  walkMin: number,
+  walkSteps: WalkStep[],
+): Paso[] {
+  if (modoId === "walking") {
+    return walkSteps.map((s) => {
+      const icono = maneuverIcon(s.maneuver, s.modifier);
+      const distStr =
+        s.distance < 50
+          ? ""
+          : s.distance < 1000
+            ? ` · ${Math.round(s.distance)}m`
+            : ` · ${(s.distance / 1000).toFixed(1)}km`;
+      const nombre = s.name || (s.maneuver === "arrive" ? "Llegada" : "Continuar");
+      return { icono, texto: `${nombre}${distStr}`, duracion: Math.round(s.duration / 60) };
+    });
+  }
+
+  const walkToStation = Math.max(2, Math.round(walkMin * 0.35));
+  const walkFromStation = Math.max(2, Math.round(walkMin * 0.2));
+  const emoji = modoId === "subte" ? "🚇" : modoId === "tren" ? "🚂" : "🚌";
+  const label = modoId === "subte" ? "Subte" : modoId === "tren" ? "Tren" : "Colectivo";
+  const transitMin =
+    modoId === "subte"
+      ? Math.max(5, Math.round(distKm * 1.8))
+      : modoId === "tren"
+        ? Math.max(8, Math.round(distKm * 1.2))
+        : Math.max(3, Math.round(distKm * 4));
+
+  return [
+    { icono: "🚶", texto: `Caminar ~${walkToStation} min hasta la parada`, duracion: walkToStation },
+    { icono: emoji, texto: `Tomar el ${label} (~${transitMin} min)`, duracion: transitMin },
+    { icono: "🚶", texto: `Caminar ~${walkFromStation} min hasta el destino`, duracion: walkFromStation },
+  ];
+}
+
 export default function ControlPanel({
   visibility,
   onToggle,
@@ -128,9 +199,12 @@ export default function ControlPanel({
   searchResult,
   onClearSearch,
   onRouteGeo,
+  onSetRoutePoints,
 }: Props) {
   const [abierto, setAbierto] = useState(true);
   const [capasAbiertas, setCapasAbiertas] = useState(false);
+  const [subteAbierto, setSubteAbierto] = useState(false);
+  const [trenAbierto, setTrenAbierto] = useState(false);
 
   // Main search
   const [busqueda, setBusqueda] = useState("");
@@ -151,6 +225,11 @@ export default function ControlPanel({
   const [modosResult, setModosResult] = useState<
     { id: string; emoji: string; label: string; minutos: number; layerKey: LayerKey | null }[] | null
   >(null);
+  const [routeInfo, setRouteInfo] = useState<{
+    distKm: number;
+    walkMin: number;
+    steps: WalkStep[];
+  } | null>(null);
   const sugA = useSugerencias(textA);
   const sugB = useSugerencias(textB);
 
@@ -217,59 +296,83 @@ export default function ControlPanel({
   }
 
   function swapAB() {
+    const newA = coordsB;
+    const newB = coordsA;
     setTextA(textB);
     setTextB(textA);
-    setCoordsA(coordsB);
-    setCoordsB(coordsA);
+    setCoordsA(newA);
+    setCoordsB(newB);
     sugA.lock();
     sugB.lock();
     setModosResult(null);
     setModoSel(null);
+    setRouteInfo(null);
     onRouteGeo(null);
   }
 
-  async function calcularOpciones() {
-    if (!coordsA || !coordsB || calculando) return;
-    setCalculando(true);
-    setRouteErr(null);
-    setModosResult(null);
-    setModoSel(null);
-    try {
-      const res = await fetch(
-        `/api/ruta?olng=${coordsA.lng}&olat=${coordsA.lat}&dlng=${coordsB.lng}&dlat=${coordsB.lat}&mode=foot`,
-      );
-      const data = await res.json() as {
-        geometry?: RouteGeometry;
-        distance?: number;
-        duration?: number;
-        error?: string;
-      };
-      if (!res.ok || !data.geometry) {
-        setRouteErr(data.error ?? "No se pudo calcular la ruta.");
-      } else {
-        onRouteGeo(data.geometry);
-        onFlyTo(
-          (coordsA.lng + coordsB.lng) / 2,
-          (coordsA.lat + coordsB.lat) / 2,
-          13,
+  // Keep calcularOpciones in a ref so the useEffect below always calls the latest version
+  const calcularOpcionesRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    calcularOpcionesRef.current = async function calcularOpciones() {
+      if (!coordsA || !coordsB || calculando) return;
+      setCalculando(true);
+      setRouteErr(null);
+      setModosResult(null);
+      setModoSel(null);
+      setRouteInfo(null);
+      try {
+        const res = await fetch(
+          `/api/ruta?olng=${coordsA.lng}&olat=${coordsA.lat}&dlng=${coordsB.lng}&dlat=${coordsB.lat}&mode=foot`,
         );
-        const distKm = (data.distance ?? 0) / 1000;
-        const walkMin = Math.round((data.duration ?? 0) / 60);
-        const modos = MODOS_TRANSITO.map((m) => ({
-          id: m.id,
-          emoji: m.emoji,
-          label: m.label,
-          layerKey: m.layerKey,
-          minutos: m.calcMin(distKm, walkMin),
-        })).sort((a, b) => a.minutos - b.minutos);
-        setModosResult(modos);
+        const data = await res.json() as {
+          geometry?: RouteGeometry;
+          distance?: number;
+          duration?: number;
+          steps?: WalkStep[];
+          error?: string;
+        };
+        if (!res.ok || !data.geometry) {
+          setRouteErr(data.error ?? "No se pudo calcular la ruta.");
+        } else {
+          onRouteGeo(data.geometry);
+          onFlyTo(
+            (coordsA.lng + coordsB.lng) / 2,
+            (coordsA.lat + coordsB.lat) / 2,
+            13,
+          );
+          const distKm = (data.distance ?? 0) / 1000;
+          const walkMin = Math.round((data.duration ?? 0) / 60);
+          const steps = data.steps ?? [];
+          setRouteInfo({ distKm, walkMin, steps });
+          const modos = MODOS_TRANSITO.map((m) => ({
+            id: m.id,
+            emoji: m.emoji,
+            label: m.label,
+            layerKey: m.layerKey,
+            minutos: m.calcMin(distKm, walkMin),
+          })).sort((a, b) => a.minutos - b.minutos);
+          setModosResult(modos);
+        }
+      } catch {
+        setRouteErr("Error de conexión al calcular la ruta.");
+      } finally {
+        setCalculando(false);
       }
-    } catch {
-      setRouteErr("Error de conexión al calcular la ruta.");
-    } finally {
-      setCalculando(false);
+    };
+  });
+
+  // Sync map markers and auto-calculate route when both coords change
+  useEffect(() => {
+    onSetRoutePoints(
+      coordsA || coordsB
+        ? { a: coordsA ?? null, b: coordsB ?? null }
+        : null,
+    );
+    if (coordsA && coordsB) {
+      calcularOpcionesRef.current();
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coordsA, coordsB]);
 
   function seleccionarModo(modo: { id: string; layerKey: LayerKey | null }) {
     setModoSel(modo.id);
@@ -286,6 +389,7 @@ export default function ControlPanel({
     setModosResult(null);
     setModoSel(null);
     setRouteErr(null);
+    setRouteInfo(null);
     onRouteGeo(null);
   }
 
@@ -394,6 +498,7 @@ export default function ControlPanel({
                     sugA.setShow(true);
                     setModosResult(null);
                     setModoSel(null);
+                    setRouteInfo(null);
                   }}
                   onFocus={() => sugA.items.length > 0 && sugA.setShow(true)}
                   onBlur={() => setTimeout(() => sugA.setShow(false), 150)}
@@ -425,14 +530,15 @@ export default function ControlPanel({
                     sugA.setShow(false);
                     setModosResult(null);
                     setModoSel(null);
+                    setRouteInfo(null);
                     geocodearA(s);
                   }}
                 />
               )}
             </div>
 
-            {/* Swap button */}
-            <div className="flex justify-center">
+            {/* Swap button — right aligned */}
+            <div className="flex justify-end">
               <button
                 onClick={swapAB}
                 title="Intercambiar origen y destino"
@@ -453,6 +559,7 @@ export default function ControlPanel({
                     sugB.setShow(true);
                     setModosResult(null);
                     setModoSel(null);
+                    setRouteInfo(null);
                   }}
                   onFocus={() => sugB.items.length > 0 && sugB.setShow(true)}
                   onBlur={() => setTimeout(() => sugB.setShow(false), 150)}
@@ -484,6 +591,7 @@ export default function ControlPanel({
                     sugB.setShow(false);
                     setModosResult(null);
                     setModoSel(null);
+                    setRouteInfo(null);
                     geocodearB(s);
                   }}
                 />
@@ -491,16 +599,6 @@ export default function ControlPanel({
             </div>
 
             {routeErr && <p className="text-xs text-amber-400">{routeErr}</p>}
-
-            {/* Calcular button */}
-            {coordsA && coordsB && !modosResult && !calculando && (
-              <button
-                onClick={calcularOpciones}
-                className="flex items-center justify-center gap-2 rounded-xl bg-accent py-2 text-sm font-semibold text-black transition hover:brightness-110"
-              >
-                Ver opciones de viaje
-              </button>
-            )}
 
             {calculando && (
               <div className="flex items-center justify-center gap-2 py-2 text-sm text-muted">
@@ -540,11 +638,29 @@ export default function ControlPanel({
                     );
                   })}
                 </div>
-                {modoSel && (
-                  <p className="text-center text-xs text-muted">
-                    La capa correspondiente se activó en el mapa.
-                  </p>
+
+                {/* Step-by-step */}
+                {modoSel && routeInfo && (
+                  <div className="animate-fade-up mt-1 rounded-xl border border-line bg-panel-soft p-3">
+                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted">
+                      Paso a paso
+                    </p>
+                    <div className="flex flex-col gap-2">
+                      {generarPasos(modoSel, routeInfo.distKm, routeInfo.walkMin, routeInfo.steps).map((p, i) => (
+                        <div key={i} className="flex items-start gap-2">
+                          <span className="mt-0.5 shrink-0 text-base leading-none">{p.icono}</span>
+                          <span className="flex-1 text-xs leading-snug text-ink">{p.texto}</span>
+                          {p.duracion > 0 && (
+                            <span className="shrink-0 text-[10px] font-semibold text-muted">
+                              {p.duracion}m
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
+
                 <button
                   onClick={limpiarRuta}
                   className="mt-1 rounded-xl border border-line py-1.5 text-xs font-medium text-muted transition hover:border-red-400/40 hover:text-red-400"
@@ -562,13 +678,15 @@ export default function ControlPanel({
           </div>
 
           {/* ── Capas del mapa (colapsable) ── */}
-          <button
-            onClick={() => setCapasAbiertas((v) => !v)}
-            className="mb-2 mt-5 flex w-full items-center justify-between text-xs font-semibold uppercase tracking-wider text-muted transition hover:text-ink"
-          >
-            <span>Capas del mapa</span>
-            <span className="text-base leading-none">{capasAbiertas ? "▲" : "▼"}</span>
-          </button>
+          <div className="mb-2 mt-5">
+            <button
+              onClick={() => setCapasAbiertas((v) => !v)}
+              className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted transition hover:text-ink"
+            >
+              <span>Capas del mapa</span>
+              <span className="text-sm leading-none">{capasAbiertas ? "▲" : "▼"}</span>
+            </button>
+          </div>
           {capasAbiertas && (
             <div className="flex flex-col gap-1.5">
               {LAYERS.map((l) => {
@@ -630,17 +748,43 @@ export default function ControlPanel({
             </div>
           )}
 
-          {/* Estado del subte */}
-          <h2 className="mb-2 mt-5 text-xs font-semibold uppercase tracking-wider text-muted">
-            Estado del subte
-          </h2>
-          <SubteStatus />
+          {/* ── Estado del subte (colapsable) ── */}
+          <div className="mt-5 flex items-center gap-1.5">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted">
+              Estado del subte
+            </h2>
+            <button
+              onClick={() => setSubteAbierto((v) => !v)}
+              aria-label="Toggle estado subte"
+              className="rounded p-0.5 text-muted transition hover:text-ink"
+            >
+              <span className="text-sm leading-none">{subteAbierto ? "▲" : "▼"}</span>
+            </button>
+          </div>
+          {subteAbierto && (
+            <div className="mt-2">
+              <SubteStatus />
+            </div>
+          )}
 
-          {/* Estado del tren */}
-          <h2 className="mb-2 mt-5 text-xs font-semibold uppercase tracking-wider text-muted">
-            Estado del tren
-          </h2>
-          <TrenStatus />
+          {/* ── Estado del tren (colapsable) ── */}
+          <div className="mt-4 flex items-center gap-1.5">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted">
+              Estado del tren
+            </h2>
+            <button
+              onClick={() => setTrenAbierto((v) => !v)}
+              aria-label="Toggle estado tren"
+              className="rounded p-0.5 text-muted transition hover:text-ink"
+            >
+              <span className="text-sm leading-none">{trenAbierto ? "▲" : "▼"}</span>
+            </button>
+          </div>
+          {trenAbierto && (
+            <div className="mt-2">
+              <TrenStatus />
+            </div>
+          )}
 
           {/* Mis domicilios */}
           <h2 className="mb-2 mt-5 text-xs font-semibold uppercase tracking-wider text-muted">

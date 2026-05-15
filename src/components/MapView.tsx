@@ -43,6 +43,7 @@ interface Props {
   searchResult: { lng: number; lat: number; label: string } | null;
   flyTarget: { lng: number; lat: number; zoom?: number } | null;
   routeGeo: RouteGeometry | null;
+  routePoints: { a: { lng: number; lat: number } | null; b: { lng: number; lat: number } | null } | null;
   onSelect: (sel: SeleccionMapa | null) => void;
   onPick: (lng: number, lat: number) => void;
 }
@@ -56,6 +57,7 @@ export default function MapView({
   searchResult,
   flyTarget,
   routeGeo,
+  routePoints,
   onSelect,
   onPick,
 }: Props) {
@@ -67,6 +69,8 @@ export default function MapView({
   const markers = useRef<maplibregl.Marker[]>([]);
   const pickMarker = useRef<maplibregl.Marker | null>(null);
   const searchMarker = useRef<maplibregl.Marker | null>(null);
+  const routeMarkerA = useRef<maplibregl.Marker | null>(null);
+  const routeMarkerB = useRef<maplibregl.Marker | null>(null);
 
   // Props vivos para los handlers registrados una sola vez.
   const placingRef = useRef(placing);
@@ -534,6 +538,31 @@ export default function MapView({
         .addTo(map);
     }
   }, [searchResult]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    routeMarkerA.current?.remove();
+    routeMarkerA.current = null;
+    routeMarkerB.current?.remove();
+    routeMarkerB.current = null;
+    if (routePoints?.a) {
+      const el = document.createElement("div");
+      el.className = "pick-marker";
+      el.textContent = "\u{1F7E2}";
+      routeMarkerA.current = new maplibregl.Marker({ element: el, anchor: "bottom" })
+        .setLngLat([routePoints.a.lng, routePoints.a.lat])
+        .addTo(map);
+    }
+    if (routePoints?.b) {
+      const el = document.createElement("div");
+      el.className = "pick-marker";
+      el.textContent = "\u{1F3C1}";
+      routeMarkerB.current = new maplibregl.Marker({ element: el, anchor: "bottom" })
+        .setLngLat([routePoints.b.lng, routePoints.b.lat])
+        .addTo(map);
+    }
+  }, [routePoints]);
 
   useEffect(() => {
     const map = mapRef.current;

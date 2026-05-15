@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
   const mode = sp.get("mode") ?? "foot";
   const url =
     `https://router.project-osrm.org/route/v1/${mode}/` +
-    `${olng},${olat};${dlng},${dlat}?overview=full&geometries=geojson`;
+    `${olng},${olat};${dlng},${dlat}?overview=full&geometries=geojson&steps=true`;
 
   try {
     const ctrl = new AbortController();
@@ -36,6 +36,14 @@ export async function GET(request: NextRequest) {
         geometry: { type: "LineString"; coordinates: [number, number][] };
         distance: number;
         duration: number;
+        legs: Array<{
+          steps: Array<{
+            name: string;
+            distance: number;
+            duration: number;
+            maneuver: { type: string; modifier?: string };
+          }>;
+        }>;
       }>;
     };
 
@@ -44,10 +52,19 @@ export async function GET(request: NextRequest) {
     }
 
     const route = data.routes[0];
+    const steps = (route.legs[0]?.steps ?? []).map((s) => ({
+      name: s.name,
+      maneuver: s.maneuver.type,
+      modifier: s.maneuver.modifier,
+      distance: Math.round(s.distance),
+      duration: Math.round(s.duration),
+    }));
+
     return NextResponse.json({
       geometry: route.geometry,
       distance: Math.round(route.distance),
       duration: Math.round(route.duration),
+      steps,
     });
   } catch (err) {
     return NextResponse.json(

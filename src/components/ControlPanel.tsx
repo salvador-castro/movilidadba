@@ -35,6 +35,7 @@ interface Props {
   onSetRoutePoints: (
     pts: { a: { lng: number; lat: number } | null; b: { lng: number; lat: number } | null } | null,
   ) => void;
+  onSetRouteColor: (color: string) => void;
 }
 
 const MODOS_TRANSITO: {
@@ -200,6 +201,7 @@ export default function ControlPanel({
   onClearSearch,
   onRouteGeo,
   onSetRoutePoints,
+  onSetRouteColor,
 }: Props) {
   const [abierto, setAbierto] = useState(true);
   const [capasAbiertas, setCapasAbiertas] = useState(false);
@@ -230,6 +232,10 @@ export default function ControlPanel({
     walkMin: number;
     steps: WalkStep[];
   } | null>(null);
+  const [transitSteps, setTransitSteps] = useState<
+    { icono: string; texto: string; duracion: number }[] | null
+  >(null);
+  const [fetchingTransit, setFetchingTransit] = useState(false);
   const sugA = useSugerencias(textA);
   const sugB = useSugerencias(textB);
 
@@ -307,7 +313,10 @@ export default function ControlPanel({
     setModosResult(null);
     setModoSel(null);
     setRouteInfo(null);
+    setTransitSteps(null);
+    setFetchingTransit(false);
     onRouteGeo(null);
+    onSetRouteColor("#00d4ff");
   }
 
   // Keep calcularOpciones in a ref so the useEffect below always calls the latest version
@@ -374,10 +383,34 @@ export default function ControlPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coordsA, coordsB]);
 
-  function seleccionarModo(modo: { id: string; layerKey: LayerKey | null }) {
+  const MODO_COLORS: Record<string, string> = {
+    walking: "#e2e8f0",
+    subte: "#00aeef",
+    colectivo: "#ff7a00",
+    tren: "#2dd4bf",
+  };
+
+  async function seleccionarModo(modo: { id: string; layerKey: LayerKey | null }) {
     setModoSel(modo.id);
-    if (modo.layerKey && !visibility[modo.layerKey]) {
-      onToggle(modo.layerKey);
+    setTransitSteps(null);
+    onSetRouteColor(MODO_COLORS[modo.id] ?? "#00d4ff");
+
+    if ((modo.id === "subte" || modo.id === "tren") && coordsA && coordsB) {
+      setFetchingTransit(true);
+      try {
+        const modeParam = modo.id === "tren" ? "trenes" : "subte";
+        const res = await fetch(
+          `/api/ruta/estaciones?olng=${coordsA.lng}&olat=${coordsA.lat}&dlng=${coordsB.lng}&dlat=${coordsB.lat}&mode=${modeParam}`,
+        );
+        const data = (await res.json()) as {
+          steps?: { icono: string; texto: string; duracion: number }[];
+        };
+        if (res.ok) setTransitSteps(data.steps ?? null);
+      } catch {
+        /* silent */
+      } finally {
+        setFetchingTransit(false);
+      }
     }
   }
 
@@ -390,7 +423,10 @@ export default function ControlPanel({
     setModoSel(null);
     setRouteErr(null);
     setRouteInfo(null);
+    setTransitSteps(null);
+    setFetchingTransit(false);
     onRouteGeo(null);
+    onSetRouteColor("#00d4ff");
   }
 
   return (
@@ -645,19 +681,29 @@ export default function ControlPanel({
                     <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted">
                       Paso a paso
                     </p>
-                    <div className="flex flex-col gap-2">
-                      {generarPasos(modoSel, routeInfo.distKm, routeInfo.walkMin, routeInfo.steps).map((p, i) => (
-                        <div key={i} className="flex items-start gap-2">
-                          <span className="mt-0.5 shrink-0 text-base leading-none">{p.icono}</span>
-                          <span className="flex-1 text-xs leading-snug text-ink">{p.texto}</span>
-                          {p.duracion > 0 && (
-                            <span className="shrink-0 text-[10px] font-semibold text-muted">
-                              {p.duracion}m
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
+                    {fetchingTransit ? (
+                      <div className="flex items-center gap-2 py-1 text-xs text-muted">
+                        <span className="block h-3.5 w-3.5 animate-spin-slow rounded-full border-2 border-line border-t-accent" />
+                        Buscando estaciones…
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        {(
+                          transitSteps ??
+                          generarPasos(modoSel, routeInfo.distKm, routeInfo.walkMin, routeInfo.steps)
+                        ).map((p, i) => (
+                          <div key={i} className="flex items-start gap-2">
+                            <span className="mt-0.5 shrink-0 text-base leading-none">{p.icono}</span>
+                            <span className="flex-1 text-xs leading-snug text-ink">{p.texto}</span>
+                            {p.duracion > 0 && (
+                              <span className="shrink-0 text-[10px] font-semibold text-muted">
+                                {p.duracion}m
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
 

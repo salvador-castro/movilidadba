@@ -12,8 +12,8 @@ const LINEAS: { id: string; label: string; color: string }[] = [
   { id: "Mitre", label: "Mitre", color: "#006eb6" },
   { id: "Sarmiento", label: "Sarmiento", color: "#b8520a" },
   { id: "SanMartin", label: "San Martín", color: "#2e7d32" },
-  { id: "BelgranoN", label: "Belgrano N", color: "#c62828" },
-  { id: "BelgranoS", label: "Belgrano S", color: "#555555" },
+  { id: "BelgranoN", label: "Belgrano Norte", color: "#c62828" },
+  { id: "BelgranoS", label: "Belgrano Sur", color: "#555555" },
   { id: "Roca", label: "Roca", color: "#880e4f" },
   { id: "Urquiza", label: "Urquiza", color: "#6a1b9a" },
 ];
@@ -49,7 +49,7 @@ export default function TrenStatus() {
   }
 
   return (
-    <div className="grid grid-cols-2 gap-1.5">
+    <div className="flex flex-col gap-1.5">
       {LINEAS.map((l) => {
         const alerta = datos.find(
           (a) =>
@@ -70,11 +70,11 @@ export default function TrenStatus() {
               🚂
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[10px] font-semibold text-ink">
+              <span className="block text-[10px] font-semibold text-ink">
                 {l.label}
               </span>
               <span
-                className={`block truncate text-[10px] ${
+                className={`block text-[10px] ${
                   error ? "text-muted" : alerta ? "text-amber-400" : "text-emerald-400"
                 }`}
               >

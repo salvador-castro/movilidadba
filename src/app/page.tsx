@@ -55,6 +55,7 @@ export default function Home() {
     a: { lng: number; lat: number } | null;
     b: { lng: number; lat: number } | null;
   } | null>(null);
+  const [routeColor, setRouteColor] = useState("#00d4ff");
 
   /* --- Sesion + favoritos --- */
   const cargarFavoritos = useCallback(async () => {
@@ -151,6 +152,7 @@ export default function Home() {
         flyTarget={flyTarget}
         routeGeo={routeGeo}
         routePoints={routePoints}
+        routeColor={routeColor}
         onSelect={setSel}
         onPick={handlePick}
       />
@@ -175,6 +177,7 @@ export default function Home() {
           onClearSearch={clearSearch}
           onRouteGeo={setRouteGeo}
           onSetRoutePoints={setRoutePoints}
+          onSetRouteColor={setRouteColor}
         />
 
         {/* Banner de modo "colocar pin" */}

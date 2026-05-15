@@ -44,6 +44,7 @@ interface Props {
   flyTarget: { lng: number; lat: number; zoom?: number } | null;
   routeGeo: RouteGeometry | null;
   routePoints: { a: { lng: number; lat: number } | null; b: { lng: number; lat: number } | null } | null;
+  routeColor: string;
   onSelect: (sel: SeleccionMapa | null) => void;
   onPick: (lng: number, lat: number) => void;
 }
@@ -58,6 +59,7 @@ export default function MapView({
   flyTarget,
   routeGeo,
   routePoints,
+  routeColor,
   onSelect,
   onPick,
 }: Props) {
@@ -71,6 +73,7 @@ export default function MapView({
   const searchMarker = useRef<maplibregl.Marker | null>(null);
   const routeMarkerA = useRef<maplibregl.Marker | null>(null);
   const routeMarkerB = useRef<maplibregl.Marker | null>(null);
+  const colectivosFiltroRef = useRef(colectivosFiltro);
 
   // Props vivos para los handlers registrados una sola vez.
   const placingRef = useRef(placing);
@@ -79,6 +82,7 @@ export default function MapView({
   placingRef.current = placing;
   onSelectRef.current = onSelect;
   onPickRef.current = onPick;
+  colectivosFiltroRef.current = colectivosFiltro;
 
   /* --- Crear el mapa una sola vez --- */
   useEffect(() => {
@@ -444,9 +448,10 @@ export default function MapView({
     const map = mapRef.current;
     if (!map) return;
     try {
+      const filtro = colectivosFiltroRef.current;
       const url =
-        key === "colectivos" && colectivosFiltro.trim()
-          ? `/api/transporte/colectivos?linea=${encodeURIComponent(colectivosFiltro.trim())}`
+        key === "colectivos" && filtro.trim()
+          ? `/api/transporte/colectivos?linea=${encodeURIComponent(filtro.trim())}`
           : `/api/transporte/${key}`;
       const res = await fetch(url);
       if (!res.ok) return;
@@ -574,6 +579,14 @@ export default function MapView({
       });
     }
   }, [flyTarget]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !readyRef.current) return;
+    if (map.getLayer("lyr-route")) {
+      map.setPaintProperty("lyr-route", "line-color", routeColor);
+    }
+  }, [routeColor]);
 
   useEffect(() => {
     const map = mapRef.current;

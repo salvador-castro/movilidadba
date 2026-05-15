@@ -128,7 +128,7 @@ export default function Home() {
   }, [supabase]);
 
   return (
-    <main className="relative h-dvh w-screen overflow-hidden">
+    <main className="fixed inset-0 overflow-hidden">
       <MapView
         visibility={visibility}
         colectivosFiltro={colectivosFiltro}

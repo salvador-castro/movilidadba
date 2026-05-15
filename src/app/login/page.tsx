@@ -60,7 +60,7 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex h-dvh w-screen items-center justify-center overflow-hidden p-4">
+    <main className="relative flex min-h-screen w-screen items-center justify-center overflow-hidden p-4">
       {/* Fondo decorativo */}
       <div
         className="pointer-events-none absolute inset-0 opacity-60"

@@ -481,7 +481,14 @@ export default function MapView({
     }
   }, [flyTarget]);
 
-  return <div ref={containerRef} className="absolute inset-0" />;
+  // Estilo inline: la CSS de MapLibre (.maplibregl-map) pisaria una clase de
+  // Tailwind por el orden de capas. Inline gana siempre.
+  return (
+    <div
+      ref={containerRef}
+      style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
+    />
+  );
 }
 
 /* ----------------- helpers ----------------- */
